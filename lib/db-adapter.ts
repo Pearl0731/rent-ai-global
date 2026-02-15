@@ -19,8 +19,11 @@ const withTimeoutMs = <T>(p: Promise<T>, ms: number): Promise<T> =>
 
 // 获取当前运行环境
 export function getAppRegion(): 'global' | 'china' {
-  const region = process.env.NEXT_PUBLIC_APP_REGION || 'global'
-  return region === 'china' ? 'china' : 'global'
+  const region = process.env.APP_REGION || process.env.NEXT_PUBLIC_APP_REGION
+  if (region === 'china') return 'china'
+  if (region === 'global') return 'global'
+  const hasCloudbaseSecrets = Boolean(process.env.CLOUDBASE_SECRET_ID && process.env.CLOUDBASE_SECRET_KEY)
+  return hasCloudbaseSecrets ? 'china' : 'global'
 }
 
 // 统一用户类型定义

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth-adapter'
-import { getDatabaseAdapter } from '@/lib/db-adapter'
+import { getAppRegion, getDatabaseAdapter } from '@/lib/db-adapter'
 import { prisma } from '@/lib/db'
 
 // 定义 Next.js 15 的 params 类型
@@ -78,7 +78,7 @@ export async function GET(
   try {
     const db = getDatabaseAdapter()
     
-    const region = process.env.NEXT_PUBLIC_APP_REGION || 'global'
+    const region = getAppRegion()
     
     console.log('Fetching property:', searchId, 'Region:', region)
     

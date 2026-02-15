@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getDatabaseAdapter } from '@/lib/db-adapter'
+
+export const dynamic = 'force-dynamic'
+import { getAppRegion, getDatabaseAdapter } from '@/lib/db-adapter'
 import { prisma } from '@/lib/db'
 import { supabaseAdmin } from '@/lib/supabase'
 
@@ -22,7 +24,7 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20')
 
     const db = getDatabaseAdapter()
-    const region = process.env.NEXT_PUBLIC_APP_REGION || 'global'
+    const region = getAppRegion()
     const fetchPropertiesFromSupabase = async () => {
       if (!supabaseAdmin) return []
       const tables = ['Property', 'property', 'properties']
@@ -100,38 +102,168 @@ export async function GET(request: NextRequest) {
     
     if (petFriendly === 'true') filters.petFriendly = true
 
+    const extractTextFromObject = (value: any) => {
+      if (!value || typeof value !== 'object') return ''
+      const keys = [
+        'city',
+        'cityName',
+        'city_name',
+        'city_cn',
+        'district',
+        'region',
+        'state',
+        'stateName',
+        'state_name',
+        'province',
+        'provinceName',
+        'province_name',
+        'address',
+        'addressLine',
+        'address_line',
+        'location',
+        'street',
+        'streetAddress',
+        'street_address',
+        'title',
+        'name',
+        'propertyName',
+        'property_name',
+        'description'
+      ]
+      const parts: any[] = []
+      keys.forEach((key) => {
+        const v = (value as any)[key]
+        if (v !== undefined && v !== null && v !== '') {
+          parts.push(v)
+        }
+      })
+      const primitiveValues = Object.values(value).filter((v) => ['string', 'number'].includes(typeof v))
+      const merged = [...parts, ...primitiveValues]
+      return merged.join(' ')
+    }
+    const collectPrimitiveValues = (value: any, maxDepth = 4) => {
+      const result: any[] = []
+      const seen = new Set<any>()
+      const stack: Array<{ v: any; depth: number }> = [{ v: value, depth: 0 }]
+      while (stack.length > 0) {
+        const { v, depth } = stack.pop() as { v: any; depth: number }
+        if (v === null || v === undefined) continue
+        const t = typeof v
+        if (t === 'string' || t === 'number' || t === 'boolean') {
+          result.push(v)
+          continue
+        }
+        if (depth >= maxDepth) continue
+        if (t === 'object') {
+          if (seen.has(v)) continue
+          seen.add(v)
+          if (Array.isArray(v)) {
+            v.forEach((item) => stack.push({ v: item, depth: depth + 1 }))
+          } else {
+            Object.values(v).forEach((item) => stack.push({ v: item, depth: depth + 1 }))
+          }
+        }
+      }
+      return result
+    }
+    const normalizeText = (value: any) => {
+      let text = ''
+      if (Array.isArray(value)) {
+        text = value.map((v) => normalizeText(v)).join(' ')
+      } else if (value && typeof value === 'object') {
+        const direct = extractTextFromObject(value)
+        const deep = collectPrimitiveValues(value).join(' ')
+        text = `${direct} ${deep}`.trim()
+      } else {
+        text = String(value ?? '')
+      }
+      return text.replace(/\s+/g, ' ').trim().toLowerCase()
+    }
+    const matchText = (field: any, query: string) => {
+      const left = normalizeText(field)
+      const right = normalizeText(query)
+      if (!right) return true
+      if (!left) return false
+      return left.includes(right) || right.includes(left)
+    }
+    const matchAnyField = (fields: any[], query: string) =>
+      fields.some((field) => matchText(field, query))
+
     const applyMemoryFilters = (items: any[]) => {
       let list = items
-      const normalizedKeyword = keyword?.trim().toLowerCase()
-      const cityLower = city?.toLowerCase()
-      const stateLower = state?.toLowerCase()
+      const normalizedKeyword = normalizeText(keyword)
+      const keywordTokens = normalizedKeyword
+        ? normalizedKeyword.split(/[\s,]+/).filter(Boolean)
+        : []
+      const cityQuery = normalizeText(city)
+      const stateQuery = normalizeText(state)
       list = list.filter((p: any) => {
-        if (p.status && String(p.status).toUpperCase() !== 'AVAILABLE') {
+        const locationValue = p.location ?? p.addressLocation ?? p.geo ?? p.mapLocation
+        const addressObject = p.addressInfo ?? p.addressDetail ?? p.address_details ?? p.addressDetails
+        const cityValue =
+          p.city ??
+          p.cityName ??
+          p.city_name ??
+          p.city_cn ??
+          p.district ??
+          p.region ??
+          locationValue?.city ??
+          addressObject?.city ??
+          p.address?.city
+        const stateValue =
+          p.state ??
+          p.stateName ??
+          p.state_name ??
+          p.province ??
+          p.provinceName ??
+          p.province_name ??
+          locationValue?.state ??
+          addressObject?.state ??
+          p.address?.state
+        const addressValue =
+          p.address ??
+          p.addressLine ??
+          p.address_line ??
+          p.location ??
+          p.street ??
+          p.streetAddress ??
+          p.street_address ??
+          addressObject?.address ??
+          addressObject?.detail ??
+          addressObject?.detailAddress ??
+          addressObject?.fullAddress ??
+          addressObject?.full_address
+        const titleValue =
+          p.title ??
+          p.name ??
+          p.propertyName ??
+          p.property_name ??
+          p.buildingName ??
+          p.communityName
+        if (region !== 'china' && p.status && String(p.status).toUpperCase() !== 'AVAILABLE') {
           const normalizedStatus = String(p.status).toUpperCase()
           if (!statusAllowList.includes(normalizedStatus)) {
             return false
           }
         }
-        if (normalizedKeyword) {
-          const haystack = [
-            p.city,
-            p.state,
-            p.address,
-            p.title,
-            p.description
-          ]
-            .filter(Boolean)
-            .map((v: any) => String(v).toLowerCase())
-            .join(' ')
-          if (!haystack.includes(normalizedKeyword)) {
-            return false
+        const textFields = [cityValue, stateValue, addressValue, titleValue, p.description]
+        const fullText = normalizeText(p)
+        if (keywordTokens.length > 0) {
+          const matchToken = keywordTokens.some((token) => matchAnyField(textFields, token))
+          if (!matchToken) {
+            const matchFallback = keywordTokens.some((token) => fullText.includes(token))
+            if (!matchFallback) return false
           }
         } else {
-          if (cityLower && (!p.city || !String(p.city).toLowerCase().includes(cityLower))) {
-            return false
+          if (cityQuery && !matchAnyField([cityValue, stateValue, addressValue, titleValue], cityQuery)) {
+            if (!fullText.includes(cityQuery)) {
+              return false
+            }
           }
-          if (stateLower && (!p.state || !String(p.state).toLowerCase().includes(stateLower))) {
-            return false
+          if (stateQuery && !matchAnyField([stateValue, cityValue, addressValue, titleValue], stateQuery)) {
+            if (!fullText.includes(stateQuery)) {
+              return false
+            }
           }
         }
         if (filters._minPrice !== undefined && (p.price === undefined || p.price < filters._minPrice)) {
@@ -210,7 +342,11 @@ export async function GET(request: NextRequest) {
       petFriendly === 'true'
     )
     if (region === 'china' || shouldFilterInMemory) {
-      allProperties = applyMemoryFilters(allProperties)
+      const filtered = applyMemoryFilters(allProperties)
+      allProperties =
+        filtered.length === 0 && (keyword || city || state) && allProperties.length > 0
+          ? allProperties
+          : filtered
     }
     if (usedSupabaseFallback) {
       allProperties.sort((a: any, b: any) => {

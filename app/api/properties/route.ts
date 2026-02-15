@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth-adapter'
 import { getAuthUser } from '@/lib/auth'
-import { getDatabaseAdapter } from '@/lib/db-adapter'
+import { getAppRegion, getDatabaseAdapter } from '@/lib/db-adapter'
 import { prisma } from '@/lib/db'
 import { randomUUID } from 'crypto'
 import { createSupabaseServerClient, supabaseAdmin } from '@/lib/supabase'
@@ -11,7 +11,7 @@ import { createSupabaseServerClient, supabaseAdmin } from '@/lib/supabase'
  */
 export async function POST(request: NextRequest) {
   try {
-    const region = process.env.NEXT_PUBLIC_APP_REGION || 'global'
+    const region = getAppRegion()
     const db = getDatabaseAdapter()
 
     const isConnectionError = (error: any) => {
@@ -314,7 +314,7 @@ export async function POST(request: NextRequest) {
       city,
       state,
       zipCode: zipCode || '',
-      country: country || (process.env.NEXT_PUBLIC_APP_REGION === 'china' ? 'CN' : 'US'),
+      country: country || (region === 'china' ? 'CN' : 'US'),
       latitude,
       longitude,
       price: parsedPrice,
@@ -467,7 +467,7 @@ export async function GET(request: NextRequest) {
     const landlordId = searchParams.get('landlordId')
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '20')
-    const region = process.env.NEXT_PUBLIC_APP_REGION || 'global'
+    const region = getAppRegion()
 
     const db = getDatabaseAdapter()
     const isConnectionError = (error: any) => {

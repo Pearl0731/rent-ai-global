@@ -152,8 +152,12 @@
   },
   "dashboard": {
     "title": "仪表板",
+    "status": "状态",
+    "approved": "已批准",
     "pending": "待处理",
     "rejected": "已拒绝",
+    "withdrawn": "已撤回",
+    "underReview": "审核中",
     "cancelled": "已取消",
     "completed": "已完成",
     "pendingApplications": "待处理申请",
