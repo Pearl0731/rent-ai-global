@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     const authHeader = request.headers.get('authorization')
     const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined
     const supabaseClient = createSupabaseServerClient(accessToken)
-    const supabaseReaders = [supabaseClient, supabaseAdmin].filter(Boolean) as any[]
+    const supabaseReaders = [supabaseAdmin, supabaseClient].filter(Boolean) as any[]
     let userId = user.id
     if (user.email) {
       try {

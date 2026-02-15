@@ -14,6 +14,7 @@ export default function ApplicationsPage() {
   const t = useTranslations('dashboard')
   const tApplication = useTranslations('application')
   const tCommon = useTranslations('common')
+  const tPayment = useTranslations('payment')
   const currencySymbol = getCurrencySymbol()
   const [applications, setApplications] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -23,6 +24,8 @@ export default function ApplicationsPage() {
     switch (s) {
       case 'APPROVED':
         return tApplication('approved')
+      case 'AGENT_APPROVED':
+        return tApplication('agentApproved')
       case 'PENDING':
         return tApplication('pending')
       case 'REJECTED':
@@ -112,14 +115,29 @@ export default function ApplicationsPage() {
                       <Badge className={getStatusColor(application.status)}>
                         {renderStatus(application.status)}
                       </Badge>
+                      {(application.status || '').toUpperCase() === 'APPROVED' || (application.status || '').toUpperCase() === 'AGENT_APPROVED' ? (
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          {tPayment('status') || "Status"}: {tPayment('pending') || "Pending Payment"}
+                        </div>
+                      ) : null}
                       <div className="mt-2">
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => router.push(`/dashboard/tenant/property/${application.propertyId}`)}
-                        >
-                          {tCommon('view') || "View"}
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          {((application.status || '').toUpperCase() === 'APPROVED' || (application.status || '').toUpperCase() === 'AGENT_APPROVED') ? (
+                            <Button 
+                              size="sm" 
+                              onClick={() => router.push(`/dashboard/tenant/payments`)}
+                            >
+                              {tPayment('title') || "Pay"}
+                            </Button>
+                          ) : null}
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => router.push(`/dashboard/tenant/property/${application.propertyId}`)}
+                          >
+                            {tCommon('view') || "View"}
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </div>

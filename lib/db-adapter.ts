@@ -1062,6 +1062,10 @@ export class CloudBaseAdapter implements DatabaseAdapter {
     if (!processedData.updatedAt) {
       processedData.updatedAt = new Date().toISOString()
     }
+
+    if (collection === 'payments' && processedData.transactionId == null) {
+      delete processedData.transactionId
+    }
     
     const result = await cloudbaseDb
       .collection(collection)

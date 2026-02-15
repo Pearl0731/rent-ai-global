@@ -254,9 +254,8 @@ export async function PATCH(
       }
     }
 
-    // 如果申请被批准 (APPROVED)，创建租赁合同并提示支付
-    // 注意：AGENT_APPROVED 只是中间状态，不创建合同
-    if (status === 'APPROVED') {
+    // 如果申请被批准 (APPROVED/AGENT_APPROVED)，创建租赁合同并提示支付
+    if (status === 'APPROVED' || status === 'AGENT_APPROVED') {
       // 获取租客的tenantAgentId（如果有中介代理）
       let tenantAgentId = null
       try {

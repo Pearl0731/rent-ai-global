@@ -66,7 +66,7 @@ export function PropertyManagement() {
       }
 
       const formattedProperties = (propertiesSource || []).map((p: any) => ({
-        id: p.id,
+        id: p.id ?? p._id ?? p.propertyId ?? p.property_id,
         title: p.title || 'Untitled Property',
         location: p.city && p.state ? `${p.city}, ${p.state}` : (p.address || 'Location not specified'),
         price: p.price || 0,

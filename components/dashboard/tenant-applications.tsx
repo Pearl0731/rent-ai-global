@@ -21,6 +21,7 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
   const t = useTranslations('dashboard')
   const tApplication = useTranslations('application')
   const tCommon = useTranslations('common')
+  const tPayment = useTranslations('payment')
   const currencySymbol = getCurrencySymbol()
   const [applications, setApplications] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -202,7 +203,8 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
                       <p className="text-sm text-muted-foreground">{application.tenant?.phone || ""}</p>
                     </div>
                   </div>
-                  <Badge
+                  <div className="text-right">
+                    <Badge
                     variant={
                       application.status === "APPROVED" || application.status === "AGENT_APPROVED"
                         ? "default"
@@ -210,9 +212,15 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
                           ? "secondary"
                           : "outline"
                     }
-                  >
-                    {renderStatus(application.status)}
-                  </Badge>
+                    >
+                      {renderStatus(application.status)}
+                    </Badge>
+                    {((application.status || '').toUpperCase() === 'APPROVED' || (application.status || '').toUpperCase() === 'AGENT_APPROVED') ? (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        {tPayment('status') || "Status"}: {tPayment('pending') || "Pending Payment"}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
@@ -281,8 +289,8 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
                     </>
                   )}
                   {userType === 'landlord' && application.status === 'AGENT_APPROVED' && (
-                    <span className="text-sm text-muted-foreground self-center italic">
-                      {tApplication('agentApproved') || "Agent Approved"}
+                    <span className="text-sm text-muted-foreground self-center">
+                      {tApplication('agentApproved') || "Agent Approved"} · {tPayment('pending') || "Pending Payment"}
                     </span>
                   )}
                 </div>

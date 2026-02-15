@@ -17,6 +17,26 @@ if (process.env.STRIPE_SECRET_KEY) {
   })
 }
 
+const createPendingTransactionId = () => `pending_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+const normalizeAlipayGateway = (rawGateway: string | undefined) => {
+  const defaultGateway = 'https://openapi-sandbox.dl.alipaydev.com/gateway.do'
+  let gateway = (rawGateway || '').trim()
+  if (!gateway) return defaultGateway
+  if (!/^https?:\/\//i.test(gateway)) {
+    gateway = `https://${gateway}`
+  }
+  if (gateway.includes('openapi.alipaydev.com:8800') || gateway.includes('openapi.alipaydev.com')) {
+    return defaultGateway
+  }
+  if (gateway.includes('alipaydev.com') && !gateway.includes('openapi-sandbox.dl.alipaydev.com')) {
+    return defaultGateway
+  }
+  if (!gateway.includes('gateway.do')) {
+    gateway = gateway.replace(/\/+$/, '') + '/gateway.do'
+  }
+  return gateway
+}
+
 // 支付结果
 export interface PaymentResult {
   success: boolean
@@ -94,10 +114,15 @@ export async function createAlipayOrder(
   amount: number,
   subject: string,
   metadata?: Record<string, string>,
-  isProfitSharing: boolean = false
+  isProfitSharing: boolean = false,
+  options?: { baseUrl?: string }
 ): Promise<PaymentResult> {
   try {
     const db = getDatabaseAdapter()
+    const normalizedAmount = Number(amount)
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+      return { success: false, error: 'Invalid payment amount' }
+    }
     
     // 获取支付记录（如果metadata中有paymentId）
     let paymentId = metadata?.paymentId
@@ -111,12 +136,13 @@ export async function createAlipayOrder(
     if (!payment) {
       payment = await db.create('payments', {
         userId,
-        amount,
+        amount: normalizedAmount,
         currency: 'cny',
         status: 'PENDING',
         type: metadata?.type || 'RENT',
         description: subject,
         paymentMethod: 'alipay',
+        transactionId: createPendingTransactionId(),
         metadata: metadata || {},
         createdAt: new Date(),
       })
@@ -137,13 +163,15 @@ export async function createAlipayOrder(
     }
 
     // 支付宝沙盒配置
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://7b17d9a0.r27.cpolar.top'
+    const baseUrl = options?.baseUrl && /^https?:\/\//i.test(options.baseUrl)
+      ? options.baseUrl.replace(/\/+$/, '')
+      : (process.env.NEXT_PUBLIC_APP_URL || 'https://7b17d9a0.r27.cpolar.top')
     
     // 读取环境变量，支持多种格式
     const appId = process.env.ALIPAY_APP_ID || process.env.NEXT_PUBLIC_ALIPAY_APP_ID || '9021000161601994'
     const privateKey = process.env.ALIPAY_PRIVATE_KEY || process.env.NEXT_PUBLIC_ALIPAY_PRIVATE_KEY || ''
     const alipayPublicKey = process.env.ALIPAY_PUBLIC_KEY || process.env.NEXT_PUBLIC_ALIPAY_PUBLIC_KEY || 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwKo0Yi8ZRb7Hgxo9Xb6A7GnfzjOt4XhBdXhqaLskRa/la1OQVd0m7aF8J2wrIximkxYglg5LTWC0quI2wr8wCUm8f/qCjRIn0NJFxBsY+ZiREQWQyILwiUiV8tYt+J114RYm2y0CiR+3BNUZcppoqj0u7Fru0XY+Wedn+krvmyqFZw7JKqXWeLZL1B11A8i/4XzcBDIFxm67Kwvr1Qr5UF6VEQSkIKRjF57PKWqGfZe+DmhD7PmBVsUo3mbueEJLs7qABkVLi0y3ebkRNVcBv0LW7jFaWmrR8dUSppc/HvDMLaNj6Cnt6T38cRZxQ5YZzYHE05EfYIEdbusto0cDmwIDAQAB'
-    const gateway = process.env.ALIPAY_GATEWAY || process.env.NEXT_PUBLIC_ALIPAY_GATEWAY || 'https://openapi-sandbox.dl.alipaydev.com/gateway.do'
+    const gateway = normalizeAlipayGateway(process.env.ALIPAY_GATEWAY || process.env.NEXT_PUBLIC_ALIPAY_GATEWAY)
     
     // 检查私钥是否配置
     if (!privateKey || privateKey.trim() === '') {
@@ -164,7 +192,7 @@ export async function createAlipayOrder(
     const outTradeNo = `RENT_${paymentId}_${Date.now()}`
     // 支付宝金额单位为元
     // 金额在数据库中已经以元为单位存储，直接使用，不要转换
-    const totalAmount = amount.toFixed(2)
+    const totalAmount = normalizedAmount.toFixed(2)
     
     console.log('Payment amount for Alipay:', { 
       originalAmount: amount, 
@@ -182,6 +210,9 @@ export async function createAlipayOrder(
       subject,
       paymentId: paymentId as string
     })
+    if (!paymentUrl) {
+      throw new Error('Failed to build Alipay payment URL')
+    }
 
     // 更新支付记录的订单号
     await db.update('payments', paymentId as string, {
@@ -189,7 +220,8 @@ export async function createAlipayOrder(
       metadata: {
         ...(typeof payment.metadata === 'object' ? payment.metadata : {}),
         outTradeNo,
-        alipayOrderCreated: true
+        alipayOrderCreated: true,
+        paymentUrl
       }
     })
 
@@ -417,13 +449,18 @@ export async function createWechatPayOrder(
   // TODO: 集成微信支付 SDK
   try {
     const db = getDatabaseAdapter()
+    const normalizedAmount = Number(amount)
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+      return { success: false, error: 'Invalid payment amount' }
+    }
     const payment = await db.create('payments', {
       userId,
       type: 'MEMBERSHIP', // Default
-      amount,
+      amount: normalizedAmount,
       status: 'PENDING',
       paymentMethod: 'wechat',
       description,
+      transactionId: createPendingTransactionId(),
       metadata: {
         ...metadata,
         profit_sharing: isProfitSharing ? 'Y' : 'N'
@@ -611,7 +648,7 @@ export async function createRentPayment(
     escrowStatus: 'HELD_IN_ESCROW',
     distribution: distribution as any, // Store JSON
     propertyId: propertyId, 
-    transactionId: null,
+    ...(region === 'china' ? { transactionId: createPendingTransactionId() } : {}),
     metadata: {
       leaseId,
       rentAmount,

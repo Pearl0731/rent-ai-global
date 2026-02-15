@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useTranslations } from 'next-intl'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -23,6 +23,7 @@ export function PaymentHistory({ userType }: PaymentHistoryProps) {
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
   const [selectedPayment, setSelectedPayment] = useState<any>(null)
   const [showPaymentSuccess, setShowPaymentSuccess] = useState(false)
+  const previousStatusesRef = useRef<Record<string, string>>({})
   // 获取region，客户端组件可以直接访问NEXT_PUBLIC_开头的环境变量
   const isChina = (process.env.NEXT_PUBLIC_APP_REGION || 'global') === 'china'
   
@@ -89,7 +90,25 @@ export function PaymentHistory({ userType }: PaymentHistoryProps) {
       if (response.ok) {
         const data = await response.json()
         console.log('Fetched payments:', data.payments?.length, data.payments)
-        setPayments(data.payments || [])
+        const nextPayments = data.payments || []
+        const previousStatuses = previousStatusesRef.current
+        const nextStatuses: Record<string, string> = {}
+        let hasNewCompletion = false
+        nextPayments.forEach((p: any) => {
+          const id = String(p.id ?? p._id ?? '')
+          if (!id) return
+          const status = String(p.status || '').toUpperCase()
+          nextStatuses[id] = status
+          const previousStatus = previousStatuses[id]
+          if (status === 'COMPLETED' && previousStatus && previousStatus !== 'COMPLETED') {
+            hasNewCompletion = true
+          }
+        })
+        previousStatusesRef.current = nextStatuses
+        setPayments(nextPayments)
+        if (hasNewCompletion) {
+          setShowPaymentSuccess(true)
+        }
       } else {
         console.error('Failed to fetch payments:', response.status, await response.text())
       }
@@ -360,6 +379,8 @@ export function PaymentHistory({ userType }: PaymentHistoryProps) {
               }
 
               // 调用支付API
+              const controller = new AbortController()
+              const timeoutId = setTimeout(() => controller.abort(), 20000)
               const response = await fetch(`/api/payments/${selectedPayment.id}/initiate`, {
                 method: 'POST',
                 headers: {
@@ -367,7 +388,9 @@ export function PaymentHistory({ userType }: PaymentHistoryProps) {
                   Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({ paymentMethod: method }),
+                signal: controller.signal
               })
+              clearTimeout(timeoutId)
 
               const data = await response.json()
               console.log('Payment initiation response:', data)
@@ -380,9 +403,13 @@ export function PaymentHistory({ userType }: PaymentHistoryProps) {
                 console.error('Payment initiation failed:', data)
                 alert(data.error || (isChina ? '支付初始化失败' : 'Failed to initialize payment'))
               }
-            } catch (error) {
+            } catch (error: any) {
               console.error('Payment initiation error:', error)
-              alert(isChina ? '支付初始化失败' : 'Failed to initialize payment')
+              if (error?.name === 'AbortError') {
+                alert(isChina ? '支付请求超时，请重试' : 'Payment request timed out, please try again')
+              } else {
+                alert(isChina ? '支付初始化失败' : 'Failed to initialize payment')
+              }
             }
           }}
           amount={selectedPayment.amount}

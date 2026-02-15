@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
     const authHeader = request.headers.get('authorization')
     const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined
     const supabaseClient = createSupabaseServerClient(accessToken)
-    const supabaseReaders = [supabaseClient, supabaseAdmin].filter(Boolean) as any[]
+    const supabaseReaders = [supabaseAdmin, supabaseClient].filter(Boolean) as any[]
     const userIds = new Set<string>([String(user.id)])
     let userEmail = user.email || ''
     if (accessToken && supabaseClient) {
@@ -378,6 +378,99 @@ export async function GET(request: NextRequest) {
           pendingIssues = sbStats.pendingIssues
         }
       }
+    } else if (region === 'china') {
+      const landlordIdSet = new Set<string>(Array.from(userIds).map((id) => String(id)))
+      let normalizedEmail = userEmail ? String(userEmail).toLowerCase() : ''
+      if (!normalizedEmail && user.email) {
+        normalizedEmail = String(user.email).toLowerCase()
+      }
+      try {
+        if (user.email) {
+          const dbUser = await db.findUserByEmail(user.email)
+          if (dbUser?.id) landlordIdSet.add(String(dbUser.id))
+        }
+      } catch {}
+      const allProperties = await db.query('properties', {})
+      const properties = allProperties.filter((p: any) => {
+        const ownerId = String(
+          p.landlordId ||
+            p.landlord_id ||
+            p.ownerId ||
+            p.owner_id ||
+            p.userId ||
+            p.user_id ||
+            ''
+        )
+        if (ownerId && landlordIdSet.has(ownerId)) return true
+        if (!normalizedEmail) return false
+        const ownerEmail = String(
+          p.landlordEmail ||
+            p.landlord_email ||
+            p.ownerEmail ||
+            p.owner_email ||
+            p.userEmail ||
+            p.user_email ||
+            ''
+        ).toLowerCase()
+        return ownerEmail && ownerEmail === normalizedEmail
+      })
+      totalProperties = properties.length
+      const propertyIds = new Set(
+        properties
+          .map((p: any) => p.id || p._id)
+          .filter(Boolean)
+          .map((id: any) => String(id))
+      )
+      const tenantIdSet = new Set<string>()
+      const applications = await db.query('applications', { status: 'APPROVED' })
+      applications.forEach((a: any) => {
+        const pid = String(a.propertyId || a.property_id || '')
+        const landlordId = String(
+          a.landlordId || a.landlord_id || a.ownerId || a.owner_id || a.userId || a.user_id || ''
+        )
+        if ((pid && propertyIds.has(pid)) || (landlordId && landlordIdSet.has(landlordId))) {
+          const tid = a.tenantId || a.tenant_id
+          if (tid) tenantIdSet.add(String(tid))
+        }
+      })
+      const leases = await db.query('leases', { status: 'ACTIVE' })
+      leases.forEach((l: any) => {
+        const landlordId = String(
+          l.landlordId || l.landlord_id || l.ownerId || l.owner_id || l.userId || l.user_id || ''
+        )
+        const pid = String(l.propertyId || l.property_id || '')
+        if ((landlordId && landlordIdSet.has(landlordId)) || (pid && propertyIds.has(pid))) {
+          const tid = l.tenantId || l.tenant_id
+          if (tid) tenantIdSet.add(String(tid))
+        }
+      })
+      activeTenants = tenantIdSet.size
+      const payments = await db.query('payments', {})
+      const now = new Date()
+      payments.forEach((p: any) => {
+        const pid = String(p.propertyId || p.property_id || '')
+        if (!pid || !propertyIds.has(pid)) return
+        const status = String(p.status || '').toUpperCase()
+        if (status !== 'PAID' && status !== 'COMPLETED') return
+        const date = new Date(p.paidAt || p.paid_at || p.createdAt || p.created_at || p.updatedAt || p.updated_at || 0)
+        if (date.getMonth() !== now.getMonth() || date.getFullYear() !== now.getFullYear()) return
+        let dist: any = p.distribution || {}
+        if (typeof dist === 'string') {
+          try {
+            dist = JSON.parse(dist)
+          } catch {
+            dist = {}
+          }
+        }
+        const amount = Number(dist.landlordNet ?? p.landlordNet ?? p.amount ?? p.total ?? 0)
+        monthlyRevenue += isNaN(amount) ? 0 : amount
+      })
+      const notifications = await db.query('notifications', {})
+      pendingIssues = notifications.filter((n: any) => {
+        const uid = String(n.userId || n.user_id || '')
+        const isRead = n.isRead ?? n.is_read
+        return uid && landlordIdSet.has(uid) && isRead === false
+      }).length
     } else if (supabaseReaders.length > 0) {
       const sbStats = await computeSupabaseStats()
       totalProperties = sbStats.totalProperties
@@ -385,34 +478,11 @@ export async function GET(request: NextRequest) {
       monthlyRevenue = sbStats.monthlyRevenue
       pendingIssues = sbStats.pendingIssues
     } else {
-      const landlordId = user.id
-      const properties = await db.query('properties', { landlordId })
-      totalProperties = properties.length
-      const ids = properties.map((p: any) => p.id)
-      const applications = await db.query('applications', { status: 'APPROVED' })
-      const leases = await db.query('leases', { status: 'ACTIVE' })
-      const tenantIdSet = new Set<string>()
-      applications.forEach((a: any) => {
-        if (ids.includes(a.propertyId)) tenantIdSet.add(String(a.tenantId))
-      })
-      leases.forEach((l: any) => {
-        if (String(l.landlordId) === String(landlordId)) tenantIdSet.add(String(l.tenantId))
-      })
-      activeTenants = tenantIdSet.size
-      const payments = await db.query('payments', {})
-      const now = new Date()
-      payments.forEach((p: any) => {
-        if (!ids.includes(p.propertyId)) return
-        const status = String(p.status || '').toUpperCase()
-        if (status !== 'PAID' && status !== 'COMPLETED') return
-        const date = new Date(p.paidAt || p.createdAt || p.updatedAt || 0)
-        if (date.getMonth() !== now.getMonth() || date.getFullYear() !== now.getFullYear()) return
-        const dist = p.distribution || {}
-        const amount = Number(dist.landlordNet ?? p.landlordNet ?? p.amount ?? p.total ?? 0)
-        monthlyRevenue += isNaN(amount) ? 0 : amount
-      })
-      const notifications = await db.query('notifications', { userId: landlordId, isRead: false })
-      pendingIssues = notifications.length
+      const sbStats = await computeSupabaseStats()
+      totalProperties = sbStats.totalProperties
+      activeTenants = sbStats.activeTenants
+      monthlyRevenue = sbStats.monthlyRevenue
+      pendingIssues = sbStats.pendingIssues
     }
 
     return NextResponse.json({

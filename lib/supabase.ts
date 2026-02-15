@@ -71,13 +71,14 @@ if (supabaseUrl && supabaseAnonKey) {
 
 const createSupabaseServerClient = (accessToken?: string) => {
   if (!supabaseUrl || !supabaseAnonKey) return null
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
   const headers: Record<string, string> = {
-    apikey: supabaseAnonKey,
+    apikey: serviceRoleKey,
   }
   if (accessToken) {
     headers.Authorization = `Bearer ${accessToken}`
   }
-  return createClient(supabaseUrl, supabaseAnonKey, {
+  return createClient(supabaseUrl, serviceRoleKey, {
     global: { headers },
     auth: { persistSession: false },
   })

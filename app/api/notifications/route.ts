@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     const authHeader = request.headers.get('authorization')
     const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined
     const supabaseClient = createSupabaseServerClient(accessToken)
-    const supabaseReaders = [supabaseClient, supabaseAdmin].filter(Boolean) as any[]
+    const supabaseReaders = [supabaseAdmin, supabaseClient].filter(Boolean) as any[]
     if (accessToken && supabaseClient) {
       try {
         const { data } = await supabaseClient.auth.getUser(accessToken)
@@ -198,7 +198,7 @@ export async function PATCH(request: NextRequest) {
     const authHeader = request.headers.get('authorization')
     const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined
     const supabaseClient = createSupabaseServerClient(accessToken)
-    const supabaseReaders = [supabaseClient, supabaseAdmin].filter(Boolean) as any[]
+    const supabaseReaders = [supabaseAdmin, supabaseClient].filter(Boolean) as any[]
 
     if (markAllAsRead) {
       // Get all unread notifications for user

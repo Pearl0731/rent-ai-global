@@ -53,28 +53,66 @@ export async function POST(
     }
 
     const region = process.env.NEXT_PUBLIC_APP_REGION || 'global'
+    const forwardedProto = request.headers.get('x-forwarded-proto')
+    const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('host')
+    const requestOrigin = forwardedProto && forwardedHost ? `${forwardedProto}://${forwardedHost}` : request.nextUrl.origin
+    const paymentMetadata = typeof payment.metadata === 'object' ? payment.metadata : {}
+    const existingPaymentUrl = typeof paymentMetadata.paymentUrl === 'string' ? paymentMetadata.paymentUrl : null
+    const isSafeAlipayUrl = (url: string | null) => {
+      if (!url) return false
+      try {
+        const parsed = new URL(url)
+        if (parsed.protocol !== 'https:') return false
+        if (parsed.hostname.includes('openapi-sandbox.dl.alipaydev.com')) return true
+        if (parsed.hostname.includes('openapi.alipaydev.com')) return false
+        if (parsed.hostname.includes('alipay')) return true
+        return false
+      } catch {
+        return false
+      }
+    }
     let paymentResult
 
     if (region === 'china') {
       // 国内版：支付宝或微信支付
       if (paymentMethod === 'alipay') {
+        if (existingPaymentUrl && isSafeAlipayUrl(existingPaymentUrl)) {
+          await db.update('payments', payment.id, {
+            paymentMethod: 'alipay'
+          })
+          return NextResponse.json({
+            success: true,
+            paymentUrl: existingPaymentUrl
+          })
+        }
         paymentResult = await createAlipayOrder(
           user.id,
           payment.amount,
           payment.description || '房租支付',
           {
             paymentId: payment.id,
-            ...(typeof payment.metadata === 'object' ? payment.metadata : {})
-          }
+            ...paymentMetadata
+          },
+          false,
+          { baseUrl: requestOrigin }
         )
       } else if (paymentMethod === 'wechat') {
+        if (existingPaymentUrl) {
+          await db.update('payments', payment.id, {
+            paymentMethod: 'wechat'
+          })
+          return NextResponse.json({
+            success: true,
+            paymentUrl: existingPaymentUrl
+          })
+        }
         paymentResult = await createWechatPayOrder(
           user.id,
           payment.amount,
           payment.description || '房租支付',
           {
             paymentId: payment.id,
-            ...(typeof payment.metadata === 'object' ? payment.metadata : {})
+            ...paymentMetadata
           }
         )
       } else {

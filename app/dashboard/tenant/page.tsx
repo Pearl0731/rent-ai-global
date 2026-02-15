@@ -22,6 +22,7 @@ export default function TenantDashboard() {
   const t = useTranslations('dashboard')
   const tHero = useTranslations('hero')
   const tCommon = useTranslations('common')
+  const tPayment = useTranslations('payment')
   const tFooter = useTranslations('footer')
   const currencySymbol = getCurrencySymbol()
   const isChina = process.env.NEXT_PUBLIC_APP_REGION === 'china'
@@ -766,16 +767,31 @@ export default function TenantDashboard() {
                             {t('deposit')}: {currencySymbol}{application.depositAmount?.toLocaleString() || 0}
                           </div>
                         </div>
-                        <div className="text-right">
+                      <div className="text-right">
                           {renderAppStatus(application.status)}
+                          {((application.status || '').toUpperCase() === 'APPROVED' || (application.status || '').toUpperCase() === 'AGENT_APPROVED') ? (
+                            <div className="mt-2 text-xs text-muted-foreground">
+                              {tPayment('status') || "Status"}: {tPayment('pending') || "Pending Payment"}
+                            </div>
+                          ) : null}
                           <div className="mt-2">
-                            <Button 
-                              size="sm" 
-                              variant="outline"
-                              onClick={() => window.location.href = `/properties/${application.propertyId}`}
-                            >
-                              {tCommon('viewDetails') || tCommon('view')}
-                            </Button>
+                            <div className="flex items-center justify-end gap-2">
+                              {((application.status || '').toUpperCase() === 'APPROVED' || (application.status || '').toUpperCase() === 'AGENT_APPROVED') ? (
+                                <Button 
+                                  size="sm"
+                                  onClick={() => window.location.href = `/dashboard/tenant/payments`}
+                                >
+                                  {tPayment('title') || "Pay"}
+                                </Button>
+                              ) : null}
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={() => window.location.href = `/properties/${application.propertyId}`}
+                              >
+                                {tCommon('viewDetails') || tCommon('view')}
+                              </Button>
+                            </div>
                           </div>
                         </div>
                       </div>

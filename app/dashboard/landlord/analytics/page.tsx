@@ -26,6 +26,18 @@ export default function AnalyticsPage() {
     fetchAnalyticsData()
   }, [])
 
+  const safeParseDistribution = (distribution: any) => {
+    if (!distribution) return null
+    if (typeof distribution === 'string') {
+      try {
+        return JSON.parse(distribution)
+      } catch {
+        return null
+      }
+    }
+    return distribution
+  }
+
   const fetchAnalyticsData = async () => {
     try {
       const token = localStorage.getItem("auth-token")
@@ -43,7 +55,7 @@ export default function AnalyticsPage() {
         // Calculate property status distribution
         const props = propertiesData.properties || []
         const statusCounts = props.reduce((acc: any, curr: any) => {
-          const status = curr.status || 'AVAILABLE'
+          const status = (curr.status || 'AVAILABLE').toUpperCase()
           acc[status] = (acc[status] || 0) + 1
           return acc
         }, {})
@@ -62,10 +74,11 @@ export default function AnalyticsPage() {
         headers: { Authorization: `Bearer ${token}` },
       })
       let activeTenants = 0
+      let cachedApplications: any[] = []
       if (applicationsRes.ok) {
         const applicationsData = await applicationsRes.json()
-        const applications = applicationsData.applications || []
-        activeTenants = applications.filter((a: any) => a.status === 'APPROVED').length
+        cachedApplications = applicationsData.applications || []
+        activeTenants = cachedApplications.filter((a: any) => a.status === 'APPROVED').length
       }
 
       // Fetch leases to calculate occupancy
@@ -86,10 +99,8 @@ export default function AnalyticsPage() {
       } catch (err) {
         console.warn('Failed to fetch leases:', err)
         // 如果leases API不存在，使用applications中的APPROVED状态作为替代
-        if (applicationsRes.ok) {
-          const applicationsData = await applicationsRes.json()
-          const applications = applicationsData.applications || []
-          occupiedProperties = applications.filter((a: any) => a.status === 'APPROVED').length
+        if (cachedApplications.length > 0) {
+          occupiedProperties = cachedApplications.filter((a: any) => a.status === 'APPROVED').length
         }
       }
 
@@ -108,8 +119,8 @@ export default function AnalyticsPage() {
           .reduce((sum: number, p: any) => {
             // 如果是租金支付，使用distribution中的landlordNet（扣除平台费和佣金后的净收入）
             if (p.type === 'RENT' && p.distribution) {
-              const dist = typeof p.distribution === 'string' ? JSON.parse(p.distribution) : p.distribution
-              return sum + (dist.landlordNet || 0)
+              const dist = safeParseDistribution(p.distribution)
+              return sum + (dist?.landlordNet || 0)
             }
             // 其他类型的支付，使用全额
             return sum + (p.amount || 0)
@@ -138,8 +149,8 @@ export default function AnalyticsPage() {
            if (monthData) {
              let amount = p.amount || 0
              if (p.type === 'RENT' && p.distribution) {
-                const dist = typeof p.distribution === 'string' ? JSON.parse(p.distribution) : p.distribution
-                amount = (dist.landlordNet || 0)
+                const dist = safeParseDistribution(p.distribution)
+                amount = (dist?.landlordNet || 0)
              }
              monthData.total += amount
            }

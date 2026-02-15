@@ -462,7 +462,7 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    const user = await getCurrentUser(request)
+    let user = await getCurrentUser(request)
     const { searchParams } = new URL(request.url)
     const landlordId = searchParams.get('landlordId')
     const page = parseInt(searchParams.get('page') || '1')
@@ -496,13 +496,56 @@ export async function GET(request: NextRequest) {
       }
     }
     
+    if (!user) {
+      const legacyAuth = await getAuthUser(request)
+      if (legacyAuth) {
+        let userType = 'TENANT'
+        try {
+          const jwt = require('jsonwebtoken')
+          const authHeader = request.headers.get('authorization')
+          if (authHeader && authHeader.startsWith('Bearer ')) {
+            const token = authHeader.substring(7)
+            const decoded = jwt.verify(
+              token,
+              process.env.JWT_SECRET || 'your-secret-key'
+            ) as { userId: string; email: string; userType?: string }
+            userType = decoded.userType || 'TENANT'
+          }
+        } catch {}
+        try {
+          const legacyDbUser =
+            (await db.findUserById(legacyAuth.userId)) ||
+            (legacyAuth.email ? await db.findUserByEmail(legacyAuth.email) : null)
+          if (legacyDbUser) {
+            user = {
+              id: legacyDbUser.id,
+              email: legacyDbUser.email,
+              name: legacyDbUser.name,
+              userType: legacyDbUser.userType,
+              isPremium: legacyDbUser.isPremium,
+              vipLevel: legacyDbUser.vipLevel || (legacyDbUser.isPremium ? 'PREMIUM' : 'FREE'),
+            }
+          } else if (legacyAuth.email) {
+            user = {
+              id: legacyAuth.userId,
+              email: legacyAuth.email,
+              name: legacyAuth.email.split('@')[0],
+              userType,
+              isPremium: false,
+              vipLevel: 'FREE',
+            }
+          }
+        } catch {}
+      }
+    }
+
     const filters: any = {}
     let resolvedUserId: string | null = null
     let tokenUserId: string | null = null
     const authHeader = request.headers.get('authorization')
     const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined
     const supabaseClient = createSupabaseServerClient(accessToken)
-    const supabaseReaders = [supabaseClient, supabaseAdmin].filter(Boolean) as any[]
+    const supabaseReaders = [supabaseAdmin, supabaseClient].filter(Boolean) as any[]
     if (accessToken && supabaseClient) {
       try {
         const { data } = await supabaseClient.auth.getUser(accessToken)
@@ -790,6 +833,43 @@ export async function GET(request: NextRequest) {
         skip: (page - 1) * limit,
         take: limit
       })
+      if (properties.length === 0) {
+        const fallbackProperties = await db.query('properties', {}, {
+          orderBy: { createdAt: 'desc' }
+        })
+        const landlordIdSet = new Set<string>()
+        if (user?.id) landlordIdSet.add(String(user.id))
+        if (resolvedUserId) landlordIdSet.add(String(resolvedUserId))
+        if (tokenUserId) landlordIdSet.add(String(tokenUserId))
+        const normalizedEmail = user?.email?.toLowerCase()
+        const matches = fallbackProperties.filter((p: any) => {
+          const ownerId = String(
+            p.landlordId ||
+              p.landlord_id ||
+              p.ownerId ||
+              p.owner_id ||
+              p.userId ||
+              p.user_id ||
+              ''
+          )
+          if (ownerId && landlordIdSet.has(ownerId)) return true
+          if (!normalizedEmail) return false
+          const ownerEmail = String(
+            p.landlordEmail ||
+              p.landlord_email ||
+              p.ownerEmail ||
+              p.owner_email ||
+              p.userEmail ||
+              p.user_email ||
+              ''
+          ).toLowerCase()
+          return ownerEmail && ownerEmail === normalizedEmail
+        })
+        if (matches.length > 0) {
+          total = matches.length
+          properties = matches.slice((page - 1) * limit, (page - 1) * limit + limit)
+        }
+      }
     }
     console.log(`Returning ${properties.length} properties for page ${page}`)
     console.log(`Returning ${properties.length} properties for page ${page}`)
@@ -823,7 +903,7 @@ export async function GET(request: NextRequest) {
     const authHeader = request.headers.get('authorization')
     const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined
     const supabaseClient = createSupabaseServerClient(accessToken)
-    const supabaseReaders = [supabaseClient, supabaseAdmin].filter(Boolean) as any[]
+    const supabaseReaders = [supabaseAdmin, supabaseClient].filter(Boolean) as any[]
     if (supabaseReaders.length === 0) {
       const { searchParams } = new URL(request.url)
       const page = parseInt(searchParams.get('page') || '1')
