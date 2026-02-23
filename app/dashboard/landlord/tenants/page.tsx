@@ -63,64 +63,60 @@ export default function TenantsPage() {
         ) : tenants.length > 0 ? (
           <div className="space-y-4">
             {tenants.map((tenant) => (
-              <Card key={tenant.id}>
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-4">
-                      <Avatar className="h-12 w-12">
-                        <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${tenant.name}`} />
-                        <AvatarFallback>
-                          {tenant.name?.split(' ').map((n: string) => n[0]).join('') || 'TN'}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <div className="font-semibold text-lg">{tenant.name}</div>
-                        <div className="flex items-center text-sm text-muted-foreground">
-                          <Mail className="h-3 w-3 mr-1" />
-                          {tenant.email}
-                        </div>
-                        {tenant.phone && (
-                          <div className="flex items-center text-sm text-muted-foreground">
-                            <Phone className="h-3 w-3 mr-1" />
-                            {tenant.phone}
-                          </div>
-                        )}
-                      </div>
+              <div key={tenant.id} className="flex items-center justify-between p-4 border rounded-lg">
+                <div className="flex items-center space-x-4">
+                  <Avatar className="h-12 w-12">
+                    <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${tenant.name}`} />
+                    <AvatarFallback>
+                      {tenant.name?.split(' ').map((n: string) => n[0]).join('') || 'TN'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <div className="font-semibold">{tenant.name}</div>
+                    <div className="flex items-center text-sm text-muted-foreground">
+                      <Mail className="h-3 w-3 mr-1" />
+                      {tenant.email}
                     </div>
-                    <div className="flex items-center space-x-4">
-                      <div className="text-right">
-                        {tenant.propertyName && (
-                          <div className="flex items-center text-sm">
-                            <Home className="h-4 w-4 mr-1" />
-                            {tenant.propertyName}
-                          </div>
-                        )}
-                        {tenant.leaseStart && tenant.leaseEnd && (
-                          <div className="text-sm text-muted-foreground">
-                            {new Date(tenant.leaseStart).toLocaleDateString()} - {new Date(tenant.leaseEnd).toLocaleDateString()}
-                          </div>
-                        )}
-                        {tenant.monthlyRent && (
-                          <div className="text-sm font-semibold text-primary">
-                            {currencySymbol}{tenant.monthlyRent.toLocaleString()}/mo
-                          </div>
-                        )}
-                        <Badge variant={tenant.source === 'lease' ? 'default' : 'secondary'} className="mt-1">
-                          {tenant.source === 'lease' ? t('activeLease') : t('approved')}
-                        </Badge>
+                    {tenant.phone && (
+                      <div className="flex items-center text-sm text-muted-foreground">
+                        <Phone className="h-3 w-3 mr-1" />
+                        {tenant.phone}
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => router.push(`/dashboard/landlord/messages?userId=${tenant.id}`)}
-                      >
-                        <MessageSquare className="h-4 w-4 mr-1" />
-                        {t('messages')}
-                      </Button>
-                    </div>
+                    )}
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+                <div className="flex items-center space-x-4">
+                  <div className="text-right">
+                    {tenant.propertyName && (
+                      <div className="flex items-center text-sm">
+                        <Home className="h-4 w-4 mr-1" />
+                        {tenant.propertyName}
+                      </div>
+                    )}
+                    {tenant.leaseStart && tenant.leaseEnd && (
+                      <div className="text-sm text-muted-foreground">
+                        {new Date(tenant.leaseStart).toLocaleDateString()} - {new Date(tenant.leaseEnd).toLocaleDateString()}
+                      </div>
+                    )}
+                    {tenant.monthlyRent && (
+                      <div className="text-sm font-semibold text-primary">
+                        {currencySymbol}{tenant.monthlyRent.toLocaleString()}/mo
+                      </div>
+                    )}
+                    <Badge variant={tenant.source === 'lease' ? 'default' : 'secondary'} className="mt-1">
+                      {tenant.source === 'lease' ? t('activeLease') : t('approved')}
+                    </Badge>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push(`/dashboard/landlord/messages?userId=${tenant.id}`)}
+                  >
+                    <MessageSquare className="h-4 w-4 mr-1" />
+                    {t('messages')}
+                  </Button>
+                </div>
+              </div>
             ))}
           </div>
         ) : (

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from 'next-intl'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -49,6 +49,24 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
   useEffect(() => {
     fetchApplications()
   }, [userType])
+
+  const uniqueApplications = useMemo(() => {
+    const map = new Map<string, any>()
+    applications.forEach((application) => {
+      const tenantId = application.tenantId || application.tenant?.id
+      const propertyId = application.propertyId || application.property?.id
+      const key = tenantId || propertyId
+        ? `tenant:${String(tenantId || 'unknown')}|property:${String(propertyId || 'unknown')}`
+        : `id:${String(application.id || '')}`
+      const existing = map.get(key)
+      const nextTime = new Date(application.appliedDate || application.createdAt || 0).getTime()
+      const existingTime = existing ? new Date(existing.appliedDate || existing.createdAt || 0).getTime() : 0
+      if (!existing || nextTime >= existingTime) {
+        map.set(key, application)
+      }
+    })
+    return Array.from(map.values())
+  }, [applications])
 
   const fetchApplications = async () => {
     try {
@@ -179,9 +197,9 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
         <CardDescription>{t('reviewAndManageApplications')}</CardDescription>
       </CardHeader>
       <CardContent>
-        {applications.length > 0 ? (
+        {uniqueApplications.length > 0 ? (
           <div className="space-y-6">
-            {applications.map((application) => (
+            {uniqueApplications.map((application) => (
               <div key={application.id} className="border rounded-lg p-6">
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center space-x-4">

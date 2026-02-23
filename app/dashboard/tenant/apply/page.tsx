@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, Suspense } from "react"
+import { useState, useEffect, Suspense, useRef } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { useTranslations } from 'next-intl'
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout"
@@ -24,6 +24,7 @@ function ApplyPageContent() {
   const propertyId = searchParams.get("propertyId")
   const [property, setProperty] = useState<any>(null)
   const [loading, setLoading] = useState(false)
+  const submittingRef = useRef(false)
   const [formData, setFormData] = useState({
     monthlyIncome: "",
     creditScore: "",
@@ -77,9 +78,12 @@ function ApplyPageContent() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+    if (loading || submittingRef.current) return
+    submittingRef.current = true
+
     const token = localStorage.getItem("auth-token")
     if (!token) {
+      submittingRef.current = false
       toast({
         title: tCommon('error'),
         description: t('loginToApply') || "You need to login to apply",
@@ -124,6 +128,7 @@ function ApplyPageContent() {
       })
     } finally {
       setLoading(false)
+      submittingRef.current = false
     }
   }
 

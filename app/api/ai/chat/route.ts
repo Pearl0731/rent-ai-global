@@ -74,6 +74,14 @@ export async function POST(request: NextRequest) {
         let totalCount = results?.reduce((sum: number, r: any) => sum + (r.totalCount || 0), 0) || 0
         if (totalCount === 0) {
           const normalizedQuery = query.trim().toLowerCase()
+          const stopwords = new Set([
+            '我', '想', '需要', '找', '在', '附近', '以内', '以上', '以下', '左右', '预算', '最好', '可以', '或者', '还是', '帮我', '筛选',
+            '房子', '房源', '公寓', '房屋', '租房', '租客', '房客'
+          ])
+          const baseTokens = normalizedQuery.split(/[\s,]+/).filter((t) => t.length > 1)
+          const cjkTokens = query.match(/[\u4e00-\u9fa5]{2,}/g) || []
+          const extraTokens = cjkTokens.filter((token) => !stopwords.has(token))
+          const tokens = Array.from(new Set([...baseTokens, ...extraTokens]))
           let rawProperties: any[] = []
           if (isChina) {
             rawProperties = await db.query('properties', {})
@@ -91,7 +99,7 @@ export async function POST(request: NextRequest) {
               .filter(Boolean)
               .map((v: any) => String(v).toLowerCase())
               .join(' ')
-            return normalizedQuery ? haystack.includes(normalizedQuery) : true
+            return tokens.length > 0 ? tokens.some((token) => haystack.includes(token)) : true
           }).slice(0, 50)
           results = [{
             platform: 'RentGuard',

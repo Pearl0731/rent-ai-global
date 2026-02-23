@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout"
@@ -31,6 +31,56 @@ export default function LandlordDashboard() {
   const [tenants, setTenants] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState("ai-search")
+
+  const toRelativeTime = (dateValue?: any) => {
+    const date = new Date(dateValue || 0)
+    if (Number.isNaN(date.getTime())) return ""
+    const diffMs = Date.now() - date.getTime()
+    const diffMin = Math.floor(diffMs / 60000)
+    const diffHr = Math.floor(diffMin / 60)
+    const diffDay = Math.floor(diffHr / 24)
+    const isChina = process.env.NEXT_PUBLIC_APP_REGION === 'china'
+    if (isChina) {
+      if (diffMin < 1) return '刚刚'
+      if (diffMin < 60) return `${diffMin} 分钟前`
+      if (diffHr < 24) return `${diffHr} 小时前`
+      return `${diffDay} 天前`
+    }
+    if (diffMin < 1) return 'just now'
+    if (diffMin < 60) return `${diffMin} minutes ago`
+    if (diffHr < 24) return `${diffHr} hours ago`
+    return `${diffDay} days ago`
+  }
+
+  const safeParseDistribution = (value: any) => {
+    if (!value) return null
+    if (typeof value === 'object') return value
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value)
+      } catch {
+        return null
+      }
+    }
+    return null
+  }
+
+  const fetchTenantsList = useCallback(async (providedToken?: string) => {
+    const token = providedToken || localStorage.getItem("auth-token")
+    if (!token) return []
+    try {
+      const response = await fetch("/api/landlord/tenants", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (response.ok) {
+        const data = await response.json().catch(() => ({}))
+        const list = data.tenants || []
+        setTenants(list)
+        return list
+      }
+    } catch {}
+    return []
+  }, [])
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -100,6 +150,12 @@ export default function LandlordDashboard() {
     bootstrap()
   }, [])
 
+  useEffect(() => {
+    if (activeTab === "tenants" && !loading && tenants.length === 0) {
+      fetchTenantsList()
+    }
+  }, [activeTab, loading, tenants.length, fetchTenantsList])
+
   const handleUnauthorized = () => {
     localStorage.removeItem("auth-token")
     localStorage.removeItem("user")
@@ -137,34 +193,24 @@ export default function LandlordDashboard() {
         }
       }
 
-      const [applicationsResult, tenantsResult] = await Promise.allSettled([
+      const [applicationsResult, tenantsResult, propertiesResult, paymentsResult, notificationsResult] = await Promise.allSettled([
         fetchWithTimeout("/api/applications?userType=landlord", 8000),
         fetchWithTimeout("/api/landlord/tenants", 8000),
+        fetchWithTimeout("/api/properties", 8000),
+        fetchWithTimeout("/api/payments", 8000),
+        fetchWithTimeout("/api/notifications", 8000),
       ])
 
+      let propertiesCount = 0
       let approvedApplicationsCount = 0
+      let monthlyRevenueFallback = 0
+      let pendingIssuesFallback = 0
+      let notifications: any[] = []
+      let applications: any[] = []
       if (applicationsResult.status === "fulfilled" && applicationsResult.value.ok) {
         const applicationsData = await applicationsResult.value.json().catch(() => ({}))
-        const applications = applicationsData.applications || []
+        applications = applicationsData.applications || []
         approvedApplicationsCount = applications.filter((a: any) => a.status === 'APPROVED').length
-
-        const isChina = process.env.NEXT_PUBLIC_APP_REGION === 'china'
-        const recent = applications.slice(0, 3).map((app: any, index: number) => {
-          const rawStatus = app.status?.toLowerCase() || "pending"
-          return {
-            id: app.id,
-            type: "application",
-            message: t('newApplicationForProperty', { title: app.property?.title || t('property') }),
-            time: index === 0
-              ? (isChina ? "2小时前" : "2 hours ago")
-              : index === 1
-                ? (isChina ? "1天前" : "1 day ago")
-                : (isChina ? "2天前" : "2 days ago"),
-            status: rawStatus,
-            displayStatus: t(rawStatus) || rawStatus,
-          }
-        })
-        setRecentActivity(recent)
       }
 
       let tenantsCount = 0
@@ -175,11 +221,73 @@ export default function LandlordDashboard() {
         setTenants(tenantsList)
       }
 
+      if (propertiesResult.status === "fulfilled" && propertiesResult.value.ok) {
+        const propertiesData = await propertiesResult.value.json().catch(() => ({}))
+        const properties = propertiesData.properties || []
+        propertiesCount = properties.length
+      }
+
+      if (paymentsResult.status === "fulfilled" && paymentsResult.value.ok) {
+        const paymentsData = await paymentsResult.value.json().catch(() => ({}))
+        const payments = paymentsData.payments || []
+        const now = new Date()
+        payments.forEach((payment: any) => {
+          const status = String(payment.status || '').toUpperCase()
+          if (status !== 'PAID' && status !== 'COMPLETED') return
+          const date = new Date(payment.paidAt || payment.createdAt || payment.updatedAt || 0)
+          if (date.getMonth() !== now.getMonth() || date.getFullYear() !== now.getFullYear()) return
+          const dist = safeParseDistribution(payment.distribution)
+          const amount = payment.type === 'RENT' && dist ? dist.landlordNet : (payment.amount ?? payment.total ?? 0)
+          monthlyRevenueFallback += Number(amount) || 0
+        })
+      }
+
+      if (notificationsResult.status === "fulfilled" && notificationsResult.value.ok) {
+        const notificationsData = await notificationsResult.value.json().catch(() => ({}))
+        notifications = notificationsData.notifications || []
+        pendingIssuesFallback = notifications.filter((n: any) => n.isRead === false || n.is_read === false).length
+      }
+
+      const activityFromApplications = (applications || []).map((app: any) => {
+        const rawStatus = app.status?.toLowerCase() || "pending"
+        const timeValue = app.createdAt || app.appliedDate || app.updatedAt
+        return {
+          id: app.id,
+          type: "application",
+          message: t('newApplicationForProperty', { title: app.property?.title || t('property') }),
+          time: toRelativeTime(timeValue),
+          status: rawStatus,
+          displayStatus: t(rawStatus) || rawStatus,
+          timestamp: new Date(timeValue || 0).getTime(),
+        }
+      })
+
+      const activityFromNotifications = (notifications || []).map((notif: any) => {
+        const timeValue = notif.createdAt || notif.created_at
+        const isRead = notif.isRead ?? notif.is_read
+        const status = isRead ? "completed" : "pending"
+        return {
+          id: notif.id,
+          type: "notification",
+          message: notif.title || notif.message || "",
+          time: toRelativeTime(timeValue),
+          status,
+          displayStatus: isRead ? t('completed') : t('unread'),
+          timestamp: new Date(timeValue || 0).getTime(),
+        }
+      })
+
+      const mergedActivity = [...activityFromApplications, ...activityFromNotifications]
+        .filter((item) => item.message)
+        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        .slice(0, 3)
+      setRecentActivity(mergedActivity)
+
       const computedStats = {
-        totalProperties: Number(serverStats?.totalProperties || 0),
+        totalProperties: Number(serverStats?.totalProperties || propertiesCount || 0),
         activeTenants: Number(serverStats?.activeTenants || tenantsCount || approvedApplicationsCount),
-        monthlyRevenue: Number(serverStats?.monthlyRevenue || 0),
-        pendingIssues: Number(serverStats?.pendingIssues || 0),
+        monthlyRevenue: Number(serverStats?.monthlyRevenue || monthlyRevenueFallback || 0),
+        pendingIssues: Number(serverStats?.pendingIssues || pendingIssuesFallback || 0),
       }
 
       setStats(computedStats)
@@ -246,16 +354,15 @@ export default function LandlordDashboard() {
           ))}
         </div>
 
-        {/* Recent Activity */}
-        {recentActivity.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('recentActivity')}</CardTitle>
-              <CardDescription>{t('latestUpdates')}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {recentActivity.map((activity) => (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('recentActivity')}</CardTitle>
+            <CardDescription>{t('latestUpdates')}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {recentActivity.length > 0 ? (
+                recentActivity.map((activity) => (
                   <div key={activity.id} className="flex items-center justify-between p-4 border rounded-lg">
                     <div className="flex items-center space-x-3">
                       <div className="w-2 h-2 rounded-full bg-primary"></div>
@@ -268,11 +375,13 @@ export default function LandlordDashboard() {
                       {activity.displayStatus || activity.status.replace("_", " ")}
                     </Badge>
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+                ))
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">{t('noRecentActivity')}</div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Main Content Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">

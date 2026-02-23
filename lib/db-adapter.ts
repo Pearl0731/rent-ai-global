@@ -1135,6 +1135,8 @@ export class CloudBaseAdapter implements DatabaseAdapter {
       avatar: user.avatar,
       userType: user.userType,
       isPremium: user.isPremium || false,
+      payoutAccountId: user.payoutAccountId,
+      verified: user.verified,
       premiumExpiry: user.premiumExpiry ? new Date(user.premiumExpiry) : null,
       vipLevel: user.vipLevel || (user.isPremium ? 'PREMIUM' : 'FREE'),
       subscriptionEndTime: user.subscriptionEndTime ? new Date(user.subscriptionEndTime) : null,

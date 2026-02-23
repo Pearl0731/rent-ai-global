@@ -19,6 +19,7 @@ export default function AgentPropertyDetailPage() {
   const [loading, setLoading] = useState(true)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const currencySymbol = getCurrencySymbol()
+  const isChina = process.env.NEXT_PUBLIC_APP_REGION === 'china'
 
   useEffect(() => {
     if (params.id) {
@@ -88,6 +89,33 @@ export default function AgentPropertyDetailPage() {
     }
   }
 
+  const renderStatus = (status?: string) => {
+    if (!status) return status
+    if (!isChina) return status
+    const normalized = status.toUpperCase()
+    if (normalized === "AVAILABLE") return "可租"
+    if (normalized === "OCCUPIED") return "已租"
+    if (normalized === "MAINTENANCE") return "维护中"
+    if (normalized === "PENDING") return "待审核"
+    return status
+  }
+
+  const renderPropertyType = (type?: string) => {
+    if (!type) return type
+    if (!isChina) return type
+    const normalized = type.toUpperCase()
+    const typeMap: Record<string, string> = {
+      APARTMENT: "公寓",
+      HOUSE: "房屋",
+      CONDO: "公寓",
+      STUDIO: "工作室",
+      TOWNHOUSE: "联排住宅",
+      VILLA: "别墅",
+      LUXURY: "豪华公寓",
+    }
+    return typeMap[normalized] || type
+  }
+
   if (loading) {
     return (
       <DashboardLayout userType="agent">
@@ -133,7 +161,7 @@ export default function AgentPropertyDetailPage() {
                 />
                 {property.status && (
                   <Badge className="absolute top-4 left-4" variant={property.status === "AVAILABLE" ? "default" : "secondary"}>
-                    {property.status}
+                    {renderStatus(property.status)}
                   </Badge>
                 )}
                 {images.length > 1 && (
@@ -243,7 +271,7 @@ export default function AgentPropertyDetailPage() {
                         </div>
                       )}
                       <div>
-                        <div className="font-semibold">{property.propertyType}</div>
+                        <div className="font-semibold">{renderPropertyType(property.propertyType)}</div>
                         <div className="text-sm text-muted-foreground">
                           {process.env.NEXT_PUBLIC_APP_REGION === 'china' ? '类型' : 'Type'}
                         </div>
@@ -281,7 +309,7 @@ export default function AgentPropertyDetailPage() {
               <CardHeader>
                 <CardTitle className="text-2xl">
                   {currencySymbol}{property.price.toLocaleString()}
-                  <span className="text-lg font-normal text-muted-foreground">/month</span>
+                  <span className="text-lg font-normal text-muted-foreground">{isChina ? "/月" : "/month"}</span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">

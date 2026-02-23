@@ -16,6 +16,7 @@ export default function AgentTransactionsPage() {
   const [transactions, setTransactions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const currencySymbol = getCurrencySymbol()
+  const isChina = process.env.NEXT_PUBLIC_APP_REGION === 'china'
 
   useEffect(() => {
     fetchTransactions()
@@ -39,6 +40,18 @@ export default function AgentTransactionsPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const renderStatus = (status?: string) => {
+    const normalized = String(status || '').toUpperCase().replace(/\s+/g, "_")
+    if (!normalized) return t('pending') || (isChina ? "待处理" : "Pending")
+    if (!isChina) return normalized.replace(/_/g, " ")
+    if (normalized === "ACTIVE") return "进行中"
+    if (normalized === "PENDING_PAYMENT") return "待支付"
+    if (normalized === "PENDING") return "待处理"
+    if (normalized === "COMPLETED") return "已完成"
+    if (normalized === "CANCELLED") return "已取消"
+    return normalized.replace(/_/g, " ")
   }
 
   return (
@@ -81,11 +94,11 @@ export default function AgentTransactionsPage() {
                     </div>
                     <div className="text-right">
                       <div className="flex items-center font-semibold text-lg">
-                        <DollarSign className="h-4 w-4" />
+                        {!isChina && <DollarSign className="h-4 w-4" />}
                         {currencySymbol}{transaction.amount?.toLocaleString() || 0}
                       </div>
                       <Badge variant={transaction.status === "COMPLETED" ? "default" : "secondary"}>
-                        {transaction.status?.replace("_", " ") || (t('pending') || "Pending")}
+                        {renderStatus(transaction.status)}
                       </Badge>
                     </div>
                   </div>

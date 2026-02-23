@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useTranslations } from 'next-intl'
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -32,6 +32,7 @@ export default function TenantLeasesPage() {
   const [payingLease, setPayingLease] = useState<any>(null)
   const [payAmount, setPayAmount] = useState("")
   const [processing, setProcessing] = useState(false)
+  const payLockRef = useRef(false)
 
   useEffect(() => {
     fetchLeases()
@@ -58,11 +59,22 @@ export default function TenantLeasesPage() {
   }
 
   const handlePayRent = async () => {
-    if (!payingLease || !payAmount) return
+    if (!payingLease || !payAmount || processing || payLockRef.current) return
+    payLockRef.current = true
 
     setProcessing(true)
     try {
       const token = localStorage.getItem("auth-token")
+      if (!token) {
+        payLockRef.current = false
+        setProcessing(false)
+        toast({
+          title: tCommon('error'),
+          description: t('loginToApply') || "Please login first",
+          variant: "destructive",
+        })
+        return
+      }
       const response = await fetch("/api/payments/create-intent", {
         method: "POST",
         headers: { 
@@ -103,6 +115,7 @@ export default function TenantLeasesPage() {
         description: error.message,
         variant: "destructive",
       })
+      payLockRef.current = false
       setProcessing(false)
     }
   }

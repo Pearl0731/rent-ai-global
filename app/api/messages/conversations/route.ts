@@ -17,6 +17,19 @@ export async function GET(request: NextRequest) {
     }
 
     const db = getDatabaseAdapter()
+    const getField = (obj: any, keys: string[]) => {
+      for (const key of keys) {
+        if (obj && obj[key] !== undefined && obj[key] !== null) return obj[key]
+      }
+      return undefined
+    }
+    const userIdSet = new Set<string>([String(user.id)])
+    if (user.email) {
+      try {
+        const dbUser = await db.findUserByEmail(user.email)
+        if (dbUser?.id) userIdSet.add(String(dbUser.id))
+      } catch {}
+    }
     const isConnectionError = (error: any) => {
       const msg = String(error?.message || '').toLowerCase()
       return msg.includes('server has closed the connection') ||
@@ -38,9 +51,11 @@ export async function GET(request: NextRequest) {
       }
       throw error
     }
-    const messages = allMessages.filter((m: any) => 
-      m.senderId === user.id || m.receiverId === user.id
-    ).sort((a: any, b: any) => {
+    const messages = allMessages.filter((m: any) => {
+      const senderId = String(getField(m, ['senderId', 'sender_id']) || '')
+      const receiverId = String(getField(m, ['receiverId', 'receiver_id']) || '')
+      return userIdSet.has(senderId) || userIdSet.has(receiverId)
+    }).sort((a: any, b: any) => {
       const dateA = new Date(a.createdAt).getTime()
       const dateB = new Date(b.createdAt).getTime()
       return dateB - dateA // 降序排列
@@ -51,7 +66,9 @@ export async function GET(request: NextRequest) {
     const partnerIds = new Set<string>()
     
     for (const msg of messages) {
-      const partnerId = msg.senderId === user.id ? msg.receiverId : msg.senderId
+      const senderId = String(getField(msg, ['senderId', 'sender_id']) || '')
+      const receiverId = String(getField(msg, ['receiverId', 'receiver_id']) || '')
+      const partnerId = userIdSet.has(senderId) ? receiverId : senderId
       
       if (!conversationsMap.has(partnerId)) {
         partnerIds.add(partnerId)
@@ -93,9 +110,11 @@ export async function GET(request: NextRequest) {
       }
       throw error
     }
-    const currentUserMessages = allMessagesForUnread.filter((m: any) => 
-      m.senderId === user.id || m.receiverId === user.id
-    )
+    const currentUserMessages = allMessagesForUnread.filter((m: any) => {
+      const senderId = String(getField(m, ['senderId', 'sender_id']) || '')
+      const receiverId = String(getField(m, ['receiverId', 'receiver_id']) || '')
+      return userIdSet.has(senderId) || userIdSet.has(receiverId)
+    })
     
     for (const partnerId of partnerIds) {
       const unreadMessages = currentUserMessages.filter((m: any) => {
@@ -103,7 +122,7 @@ export async function GET(request: NextRequest) {
         const msgSenderId = String(m.senderId || m.sender_id || '')
         const msgReceiverId = String(m.receiverId || m.receiver_id || '')
         const partnerIdStr = String(partnerId || '')
-        const userIdStr = String(user.id || '')
+        const userIdStr = Array.from(userIdSet)
         
         // 检查是否为未读消息（支持多种字段名）
         const isUnread = m.isRead === false || 
@@ -114,7 +133,7 @@ export async function GET(request: NextRequest) {
                         m.is_read === undefined
         
         return msgSenderId === partnerIdStr && 
-               msgReceiverId === userIdStr && 
+               userIdStr.includes(msgReceiverId) && 
                isUnread
       })
       

@@ -644,15 +644,27 @@ export async function GET(request: NextRequest) {
         applications = applications.filter((app: any) => String(getField(app, ['tenantId', 'tenant_id']) || '') === String(resolvedUserId))
       } else if (effectiveUserType === 'LANDLORD') {
         const properties = await effectiveDb.query('properties', {})
+        const normalizedEmail = user?.email ? String(user.email).toLowerCase() : ''
         const propertyIds = new Set(
           properties
-            .filter((p: any) => landlordIdSet.has(String(getField(p, ['landlordId', 'landlord_id']) || '')))
+            .filter((p: any) => {
+              const ownerId = String(getField(p, ['landlordId', 'landlord_id', 'ownerId', 'owner_id', 'userId', 'user_id']) || '')
+              if (ownerId && landlordIdSet.has(ownerId)) return true
+              if (!normalizedEmail) return false
+              const ownerEmail = String(getField(p, ['landlordEmail', 'landlord_email', 'ownerEmail', 'owner_email', 'userEmail', 'user_email']) || '').toLowerCase()
+              return ownerEmail && ownerEmail === normalizedEmail
+            })
             .map((p: any) => String(getField(p, ['id']) || ''))
             .filter(Boolean)
         )
         applications = applications.filter((app: any) => {
           const pid = String(getField(app, ['propertyId', 'property_id']) || '')
-          return pid && propertyIds.has(pid)
+          if (pid && propertyIds.has(pid)) return true
+          const appLandlordId = String(getField(app, ['landlordId', 'landlord_id', 'ownerId', 'owner_id', 'userId', 'user_id']) || '')
+          if (appLandlordId && landlordIdSet.has(appLandlordId)) return true
+          if (!normalizedEmail) return false
+          const appEmail = String(getField(app, ['landlordEmail', 'landlord_email', 'ownerEmail', 'owner_email', 'userEmail', 'user_email']) || '').toLowerCase()
+          return appEmail && appEmail === normalizedEmail
         })
       } else if (effectiveUserType === 'AGENT') {
         const allUsers = await effectiveDb.query('users', {}, { orderBy: { createdAt: 'desc' } })

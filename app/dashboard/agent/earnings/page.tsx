@@ -25,6 +25,7 @@ export default function AgentEarningsPage() {
   })
   const [hasPayoutAccount, setHasPayoutAccount] = useState(true)
   const [loading, setLoading] = useState(true)
+  const isChina = process.env.NEXT_PUBLIC_APP_REGION === 'china'
 
   useEffect(() => {
     fetchEarnings()
@@ -34,6 +35,14 @@ export default function AgentEarningsPage() {
     try {
       const token = localStorage.getItem("auth-token")
       if (!token) return
+      const userStr = localStorage.getItem("user")
+      let localHasPayoutAccount = false
+      if (userStr) {
+        try {
+          const localUser = JSON.parse(userStr)
+          localHasPayoutAccount = !!(localUser?.payoutAccountId || localUser?.verified || localUser?.agentProfile?.payoutAccountId || localUser?.agentProfile?.verified)
+        } catch {}
+      }
 
       const response = await fetch("/api/agent/earnings", {
         headers: { Authorization: `Bearer ${token}` },
@@ -47,13 +56,55 @@ export default function AgentEarningsPage() {
           thisMonth: data.thisMonth || 0,
           pendingPayouts: data.pendingPayouts || 0,
         })
-        setHasPayoutAccount(data.hasPayoutAccount !== false) // Default to true if undefined
+        setHasPayoutAccount(localHasPayoutAccount || data.hasPayoutAccount !== false) // Default to true if undefined
       }
     } catch (error) {
       console.error("Failed to fetch earnings:", error)
     } finally {
       setLoading(false)
     }
+  }
+
+  const renderEarningStatus = (status?: string) => {
+    const normalized = String(status || '').toUpperCase()
+    if (!isChina) {
+      if (normalized === "PENDING_RELEASE") return "Held in Escrow"
+      return status || (t('pending') || "Pending")
+    }
+    if (normalized === "PAID") return "已支付"
+    if (normalized === "PENDING_RELEASE") return "托管中"
+    if (normalized === "PENDING") return "待处理"
+    return normalized || "待处理"
+  }
+
+  const handleExport = () => {
+    const headers = isChina
+      ? ["日期", "房源", "租客", "佣金", "总租金", "状态"]
+      : ["Date", "Property", "Tenant", "Commission", "Total Rent", "Status"]
+    const rows = (earnings || []).map((earning: any) => ([
+      earning.createdAt ? new Date(earning.createdAt).toLocaleDateString() : "",
+      earning.propertyTitle || "",
+      earning.tenantName || "",
+      `${currencySymbol}${earning.amount?.toLocaleString() || 0}`,
+      `${currencySymbol}${earning.totalRent?.toLocaleString() || 0}`,
+      renderEarningStatus(earning.status),
+    ]))
+    const csvContent = [headers, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell || "").replace(/"/g, '""')}"`).join(","))
+      .join("\n")
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = isChina ? "收益报告.csv" : "earnings-report.csv"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    toast({
+      title: tCommon('success'),
+      description: isChina ? "报告已导出" : "Report exported",
+    })
   }
 
   return (
@@ -64,7 +115,7 @@ export default function AgentEarningsPage() {
             <h1 className="text-3xl font-bold">{t('earnings')}</h1>
             <p className="text-muted-foreground">{t('trackCommission') || "Track your commission and income"}</p>
           </div>
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExport}>
             <Download className="mr-2 h-4 w-4" />
             {t('exportReport') || "Export Report"}
           </Button>
@@ -74,14 +125,16 @@ export default function AgentEarningsPage() {
         {!hasPayoutAccount && (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>Missing Payout Account</AlertTitle>
+            <AlertTitle>{isChina ? "缺少收款账户" : "Missing Payout Account"}</AlertTitle>
             <AlertDescription className="flex items-center justify-between">
               <span>
-                You haven&apos;t linked a payout account yet. You won&apos;t be able to receive your commissions.
+                {isChina
+                  ? "您尚未绑定收款账户，暂时无法领取佣金。"
+                  : "You haven't linked a payout account yet. You won't be able to receive your commissions."}
               </span>
               <Button variant="outline" size="sm" className="ml-4" asChild>
                 <Link href="/dashboard/agent/settings">
-                  Link Account
+                  {isChina ? "去绑定" : "Link Account"}
                 </Link>
               </Button>
             </AlertDescription>
@@ -94,7 +147,9 @@ export default function AgentEarningsPage() {
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-muted-foreground">{t('totalEarnings') || "Total Earnings"}</p>
+                  <p className="text-sm font-medium text-muted-foreground">
+                    {isChina ? "已结算佣金" : (t('totalEarnings') || "Total Earnings")}
+                  </p>
                   <p className="text-2xl font-bold">{currencySymbol}{stats.totalEarnings.toLocaleString()}</p>
                 </div>
                 <DollarSign className="h-8 w-8 text-primary" />
@@ -105,7 +160,9 @@ export default function AgentEarningsPage() {
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-muted-foreground">{t('thisMonth') || "This Month"}</p>
+                  <p className="text-sm font-medium text-muted-foreground">
+                    {isChina ? "本月已结算" : (t('thisMonth') || "This Month")}
+                  </p>
                   <p className="text-2xl font-bold">{currencySymbol}{stats.thisMonth.toLocaleString()}</p>
                 </div>
                 <TrendingUp className="h-8 w-8 text-green-500" />
@@ -116,7 +173,9 @@ export default function AgentEarningsPage() {
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-muted-foreground">{t('pendingPayouts') || "Pending Payouts"}</p>
+                  <p className="text-sm font-medium text-muted-foreground">
+                    {isChina ? "待结算佣金" : (t('pendingPayouts') || "Pending Payouts")}
+                  </p>
                   <p className="text-2xl font-bold">{currencySymbol}{stats.pendingPayouts.toLocaleString()}</p>
                 </div>
                 <Calendar className="h-8 w-8 text-yellow-500" />
@@ -145,7 +204,7 @@ export default function AgentEarningsPage() {
                         </Badge>
                       </div>
                       <div className="text-sm text-muted-foreground mt-1">
-                        Tenant: {earning.tenantName || "Unknown"}
+                        {isChina ? "租客：" : "Tenant:"} {earning.tenantName || (isChina ? "未知" : "Unknown")}
                       </div>
                       <div className="flex items-center text-xs text-muted-foreground mt-1">
                         <Calendar className="h-3 w-3 mr-1" />
@@ -157,10 +216,10 @@ export default function AgentEarningsPage() {
                         +{currencySymbol}{earning.amount?.toLocaleString() || 0}
                       </div>
                       <div className="text-xs text-muted-foreground mb-1">
-                         Total Rent: {currencySymbol}{earning.totalRent?.toLocaleString()}
+                        {isChina ? "总租金：" : "Total Rent:"} {currencySymbol}{earning.totalRent?.toLocaleString()}
                       </div>
                       <Badge variant={earning.status === "PAID" ? "default" : (earning.status === "PENDING_RELEASE" ? "secondary" : "outline")}>
-                        {earning.status === "PENDING_RELEASE" ? "Held in Escrow" : (earning.status || t('pending'))}
+                        {renderEarningStatus(earning.status)}
                       </Badge>
                     </div>
                   </div>

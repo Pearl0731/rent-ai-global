@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { getCurrentUser } from '@/lib/auth-adapter'
-import { getDatabaseAdapter } from '@/lib/db-adapter'
+import { getAppRegion, getDatabaseAdapter } from '@/lib/db-adapter'
 import { createSupabaseServerClient, supabaseAdmin } from '@/lib/supabase'
 
 /**
@@ -20,11 +20,13 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const region = getAppRegion()
+    const isChina = region === 'china'
     const db = getDatabaseAdapter()
     const authHeader = request.headers.get('authorization')
     const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined
-    const supabaseClient = createSupabaseServerClient(accessToken)
-    const supabaseReaders = [supabaseAdmin, supabaseClient].filter(Boolean) as any[]
+    const supabaseClient = isChina ? null : createSupabaseServerClient(accessToken)
+    const supabaseReaders = isChina ? [] : ([supabaseAdmin, supabaseClient].filter(Boolean) as any[])
     const getField = (obj: any, keys: string[]) => {
       for (const key of keys) {
         const value = obj?.[key]
@@ -34,19 +36,19 @@ export async function GET(request: NextRequest) {
     }
     const baseUserId = (user as any).id || (user as any).userId
     let agentId = baseUserId
-    if ((user as any).email) {
+    if (!isChina && (user as any).email) {
       try {
         const dbUser = await db.findUserByEmail((user as any).email)
         if (dbUser?.id) agentId = dbUser.id
       } catch {}
     }
-    if (accessToken && supabaseClient) {
+    if (!isChina && accessToken && supabaseClient) {
       try {
         const { data } = await supabaseClient.auth.getUser(accessToken)
         if (data?.user?.id) agentId = data.user.id
       } catch {}
     }
-    if ((user as any).email && supabaseReaders.length > 0) {
+    if (!isChina && (user as any).email && supabaseReaders.length > 0) {
       const userTables = ['User', 'user', 'users', 'profiles', 'profile', 'user_profiles', 'userProfiles']
       for (const client of supabaseReaders) {
         for (const tableName of userTables) {
@@ -205,38 +207,58 @@ export async function GET(request: NextRequest) {
 
     // Check if agent has payout account
     let hasPayoutAccount = false
+    if ((user as any)?.payoutAccountId || (user as any)?.verified) {
+      hasPayoutAccount = true
+    }
     try {
-      const agentProfiles = await db.query('agentProfiles', { userId: agentId })
-      if (agentProfiles && agentProfiles.length > 0) {
-        hasPayoutAccount = !!(agentProfiles[0] as any).payoutAccountId
-      } else if (process.env.NEXT_PUBLIC_APP_REGION === 'china') {
-        const agent = await db.findUserById(agentId)
-        hasPayoutAccount = !!(agent as any)?.payoutAccountId
+      const idCandidates = [String(agentId), String(baseUserId)]
+      for (const uid of idCandidates) {
+        const agentProfiles = await db.query('agentProfiles', { userId: uid })
+        if (agentProfiles && agentProfiles.length > 0) {
+          const profile = agentProfiles[0] as any
+          if (profile?.payoutAccountId || profile?.verified) {
+            hasPayoutAccount = true
+            break
+          }
+        }
+      }
+      if (!hasPayoutAccount && isChina) {
+        for (const uid of idCandidates) {
+          const agent = await db.findUserById(uid)
+          if ((agent as any)?.payoutAccountId || (agent as any)?.verified) {
+            hasPayoutAccount = true
+            break
+          }
+        }
       }
     } catch (err) {
       if (supabaseReaders.length > 0) {
         const profileTables = ['agentProfiles', 'agent_profiles', 'AgentProfile', 'agentProfile']
+        const candidateIds = [String(agentId), String(baseUserId)].filter(Boolean)
         for (const client of supabaseReaders) {
           for (const tableName of profileTables) {
-            const { data, error } = await client
-              .from(tableName)
-              .select('payoutAccountId,payout_account_id,userId,user_id')
-              .eq('userId', agentId)
-              .limit(1)
-            if (!error && data && data.length > 0) {
-              const row = data[0]
-              hasPayoutAccount = !!(row.payoutAccountId || row.payout_account_id)
-              break
-            }
-            const { data: dataAlt, error: errorAlt } = await client
-              .from(tableName)
-              .select('payoutAccountId,payout_account_id,userId,user_id')
-              .eq('user_id', agentId)
-              .limit(1)
-            if (!errorAlt && dataAlt && dataAlt.length > 0) {
-              const row = dataAlt[0]
-              hasPayoutAccount = !!(row.payoutAccountId || row.payout_account_id)
-              break
+            for (const candidateId of candidateIds) {
+              const { data, error } = await client
+                .from(tableName)
+                .select('payoutAccountId,payout_account_id,verified,userId,user_id')
+                .eq('userId', candidateId)
+                .limit(1)
+              if (!error && data && data.length > 0) {
+                const row = data[0]
+                hasPayoutAccount = !!(row.payoutAccountId || row.payout_account_id || row.verified)
+              }
+              if (!hasPayoutAccount) {
+                const { data: dataAlt, error: errorAlt } = await client
+                  .from(tableName)
+                  .select('payoutAccountId,payout_account_id,verified,userId,user_id')
+                  .eq('user_id', candidateId)
+                  .limit(1)
+                if (!errorAlt && dataAlt && dataAlt.length > 0) {
+                  const row = dataAlt[0]
+                  hasPayoutAccount = !!(row.payoutAccountId || row.payout_account_id || row.verified)
+                }
+              }
+              if (hasPayoutAccount) break
             }
           }
           if (hasPayoutAccount) break

@@ -128,8 +128,8 @@ export default function LandlordPropertyDetailPage() {
 
     if (images.length + files.length > 5) {
       toast({
-        title: "Too many images",
-        description: "You can upload maximum 5 images",
+        title: t('tooManyImages'),
+        description: t('maxImagesAllowed'),
         variant: "destructive",
       })
       return
@@ -155,8 +155,8 @@ export default function LandlordPropertyDetailPage() {
       }
     } catch (error: any) {
       toast({
-        title: "Upload failed",
-        description: error.message || "Failed to upload images",
+        title: t('uploadFailed'),
+        description: error.message || t('failedToUploadImages'),
         variant: "destructive",
       })
       setUploading(false)
@@ -200,19 +200,19 @@ export default function LandlordPropertyDetailPage() {
 
       if (response.ok) {
         toast({
-          title: "Property updated",
-          description: "Your property has been updated successfully",
+          title: tCommon('success'),
+          description: t('updateSuccess'),
         })
         setEditing(false)
         fetchProperty()
       } else {
         const data = await response.json()
-        throw new Error(data.error || "Failed to update property")
+        throw new Error(data.error || t('updateFailed'))
       }
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to update property",
+        title: tCommon('error'),
+        description: error.message || t('updateFailed'),
         variant: "destructive",
       })
     } finally {
@@ -223,7 +223,7 @@ export default function LandlordPropertyDetailPage() {
   if (loading) {
     return (
       <DashboardLayout userType={userType as any}>
-        <div className="text-center py-12">{tCommon('loading') || "Loading property details..."}</div>
+        <div className="text-center py-12">{tCommon('loading')}</div>
       </DashboardLayout>
     )
   }
@@ -248,9 +248,9 @@ export default function LandlordPropertyDetailPage() {
             {tCommon('back') || "Back"}
           </Button>
           {!editing && (
-            <Button onClick={() => setEditing(true)}>
+          <Button onClick={() => setEditing(true)}>
               <Edit className="mr-2 h-4 w-4" />
-              {t('edit') || "Edit Property"}
+            {t('edit')}
             </Button>
           )}
         </div>
@@ -258,7 +258,7 @@ export default function LandlordPropertyDetailPage() {
         {editing ? (
           <Card>
             <CardHeader>
-              <CardTitle>Edit Property</CardTitle>
+              <CardTitle>{t('editProperty')}</CardTitle>
             </CardHeader>
             <CardContent>
               <form onSubmit={(e) => { e.preventDefault(); handleSave(); }} className="space-y-6">
@@ -470,7 +470,7 @@ export default function LandlordPropertyDetailPage() {
 
                 <div className="flex space-x-4">
                   <Button type="submit" disabled={saving || uploading}>
-                    {saving ? t('saving') : uploading ? t('uploading') : tCommon('saveChanges')}
+                    {saving ? t('saving') : uploading ? t('uploading') : tDashboard('saveChanges')}
                   </Button>
                   <Button type="button" variant="outline" onClick={() => {
                     setEditing(false)

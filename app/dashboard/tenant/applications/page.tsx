@@ -5,7 +5,7 @@ import { DashboardLayout } from "@/components/dashboard/dashboard-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { getCurrencySymbol } from "@/lib/utils"
 
@@ -16,6 +16,7 @@ export default function ApplicationsPage() {
   const tCommon = useTranslations('common')
   const tPayment = useTranslations('payment')
   const currencySymbol = getCurrencySymbol()
+  const isChina = process.env.NEXT_PUBLIC_APP_REGION === 'china'
   const [applications, setApplications] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -62,6 +63,24 @@ export default function ApplicationsPage() {
     fetchApplications()
   }, [])
 
+  const uniqueApplications = useMemo(() => {
+    const map = new Map<string, any>()
+    applications.forEach((application) => {
+      const tenantId = application.tenantId || application.tenant?.id
+      const propertyId = application.propertyId || application.property?.id
+      const key = tenantId || propertyId
+        ? `tenant:${String(tenantId || 'unknown')}|property:${String(propertyId || 'unknown')}`
+        : `id:${String(application.id || '')}`
+      const existing = map.get(key)
+      const nextTime = new Date(application.appliedDate || application.createdAt || 0).getTime()
+      const existingTime = existing ? new Date(existing.appliedDate || existing.createdAt || 0).getTime() : 0
+      if (!existing || nextTime >= existingTime) {
+        map.set(key, application)
+      }
+    })
+    return Array.from(map.values())
+  }, [applications])
+
   const fetchApplications = async () => {
     try {
       const token = localStorage.getItem("auth-token")
@@ -96,9 +115,9 @@ export default function ApplicationsPage() {
               <p className="text-muted-foreground">{tCommon('loading')}</p>
             </CardContent>
           </Card>
-        ) : applications.length > 0 ? (
+        ) : uniqueApplications.length > 0 ? (
           <div className="space-y-4">
-            {applications.map((application) => (
+            {uniqueApplications.map((application) => (
               <Card key={application.id}>
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
@@ -128,6 +147,15 @@ export default function ApplicationsPage() {
                               onClick={() => router.push(`/dashboard/tenant/payments`)}
                             >
                               {tPayment('title') || "Pay"}
+                            </Button>
+                          ) : null}
+                          {((application.status || '').toUpperCase() === 'REJECTED') ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => router.push(`/dashboard/tenant/apply?propertyId=${application.propertyId}`)}
+                            >
+                              {isChina ? "重新申请" : "Reapply"}
                             </Button>
                           ) : null}
                           <Button 

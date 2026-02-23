@@ -67,6 +67,23 @@ export default function TenantDashboard() {
     }, []);
   }, [leases]);
 
+  const uniqueApplications = useMemo(() => {
+    const map = new Map<string, any>()
+    applications.forEach((application) => {
+      const tenantId = application.tenantId || application.tenant?.id
+      const propertyId = application.propertyId || application.property?.id
+      const key = tenantId || propertyId
+        ? `tenant:${String(tenantId || 'unknown')}|property:${String(propertyId || 'unknown')}`
+        : `id:${String(application.id || '')}`
+      const existing = map.get(key)
+      const nextTime = new Date(application.updatedAt || application.appliedDate || application.createdAt || 0).getTime()
+      const existingTime = existing ? new Date(existing.updatedAt || existing.appliedDate || existing.createdAt || 0).getTime() : 0
+      if (!existing || nextTime >= existingTime) {
+        map.set(key, application)
+      }
+    })
+    return Array.from(map.values())
+  }, [applications])
 
   const renderAppStatus = (status?: string) => {
     const s = (status || '').toUpperCase()
@@ -626,7 +643,7 @@ export default function TenantDashboard() {
                                 )}
                               </div>
                             )}
-                            <Button variant="outline" size="sm" onClick={() => window.location.href=`/properties/${lease.propertyId}`}>
+                            <Button variant="outline" size="sm" onClick={() => router.push(`/dashboard/tenant/property/${lease.propertyId}`)}>
                               {isChina ? "查看详情" : tCommon('viewDetails')}
                             </Button>
                           </div>
@@ -754,9 +771,9 @@ export default function TenantDashboard() {
                 <CardDescription>{t('trackApplicationStatus')}</CardDescription>
               </CardHeader>
               <CardContent>
-                {applications.length > 0 ? (
+                {uniqueApplications.length > 0 ? (
                   <div className="space-y-4">
-                    {applications.map((application) => (
+                    {uniqueApplications.map((application) => (
                       <div key={application.id} className="flex items-center justify-between p-4 border rounded-lg">
                         <div>
                           <div className="font-semibold">{application.property?.title || t('property')}</div>
@@ -782,6 +799,15 @@ export default function TenantDashboard() {
                                   onClick={() => window.location.href = `/dashboard/tenant/payments`}
                                 >
                                   {tPayment('title') || "Pay"}
+                                </Button>
+                              ) : null}
+                              {((application.status || '').toUpperCase() === 'REJECTED') ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => router.push(`/dashboard/tenant/apply?propertyId=${application.propertyId}`)}
+                                >
+                                  {isChina ? "重新申请" : "Reapply"}
                                 </Button>
                               ) : null}
                               <Button 

@@ -100,7 +100,24 @@ export async function searchTenants(
       console.error('Database search error:', error)
     }
 
-    const allResults = [...dbResults]
+    const dedupedResults = (() => {
+      const map = new Map<string, any>()
+      const combined = [...dbResults]
+      combined.forEach((result, index) => {
+        const key = String(
+          result?.id ||
+            result?.tenantId ||
+            result?.email ||
+            result?.applicationId ||
+            `idx-${index}`
+        )
+        if (!map.has(key)) {
+          map.set(key, result)
+        }
+      })
+      return Array.from(map.values())
+    })()
+    const allResults = [...dedupedResults]
 
     // 2. 保存搜索需求到数据库（不阻塞主流程）
     try {
@@ -124,9 +141,18 @@ export async function searchTenants(
 async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<SearchResult> {
   const isChina = getAppRegion() === 'china'
   const rawQuery = criteria.query?.trim() || ''
-  const keywordTokens = rawQuery
-    ? rawQuery.toLowerCase().split(/[\s,]+/).filter((t) => t.length > 1)
-    : []
+  const keywordTokens = (() => {
+    if (!rawQuery) return []
+    const lower = rawQuery.toLowerCase()
+    const base = lower.split(/[\s,]+/).filter((t) => t.length > 1)
+    const cjkTokens = rawQuery.match(/[\u4e00-\u9fa5]{2,}/g) || []
+    const stopwords = new Set([
+      '我', '想', '需要', '找', '在', '附近', '以内', '以上', '以下', '左右', '预算', '最好', '可以', '或者', '还是', '帮我', '筛选',
+      '房子', '房源', '公寓', '房屋', '租房', '租客', '房客'
+    ])
+    const cjk = cjkTokens.filter((token) => !stopwords.has(token))
+    return Array.from(new Set([...base, ...cjk]))
+  })()
   const hasLocationFilter = Boolean(criteria.city || criteria.state)
   const getTokens = () => {
     if (keywordTokens.length > 0) return keywordTokens
@@ -237,6 +263,24 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
           useKeyword: false,
           useLocation: false,
           enforceStatus: true,
+          enforceNumeric: false,
+          enforcePet: false
+        })
+      }
+      if (filteredProperties.length === 0) {
+        filteredProperties = applyFilters(rawProperties, {
+          useKeyword: keywordTokens.length > 0,
+          useLocation: hasLocationFilter,
+          enforceStatus: false,
+          enforceNumeric: true,
+          enforcePet: true
+        })
+      }
+      if (filteredProperties.length === 0) {
+        filteredProperties = applyFilters(rawProperties, {
+          useKeyword: false,
+          useLocation: false,
+          enforceStatus: false,
           enforceNumeric: false,
           enforcePet: false
         })
@@ -402,6 +446,38 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
         }
         properties = filtered
       }
+      if (properties.length === 0) {
+        const allProperties = await prisma.property.findMany({
+          where: {},
+          include: {
+            landlord: {
+              select: {
+                id: true,
+                name: true,
+                email: true
+              }
+            }
+          },
+          take: 200
+        })
+        let relaxed = applyFilters(allProperties, {
+          useKeyword: keywordTokens.length > 0,
+          useLocation: hasLocationFilter,
+          enforceStatus: false,
+          enforceNumeric: true,
+          enforcePet: true
+        })
+        if (relaxed.length === 0) {
+          relaxed = applyFilters(allProperties, {
+            useKeyword: false,
+            useLocation: false,
+            enforceStatus: false,
+            enforceNumeric: false,
+            enforcePet: false
+          })
+        }
+        properties = relaxed
+      }
 
       return {
         platform: 'RentGuard',
@@ -441,12 +517,93 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
  */
 async function searchOwnTenantDatabase(criteria: ParsedLandlordSearchCriteria, landlordId: string): Promise<any[]> {
   const isChina = getAppRegion() === 'china'
+  const rawQuery = (criteria as any).query?.trim() || ''
+  const keywordTokens = (() => {
+    if (!rawQuery) return []
+    const lower = rawQuery.toLowerCase()
+    const base = lower.split(/[\s,]+/).filter((t) => t.length > 1)
+    const cjkTokens = rawQuery.match(/[\u4e00-\u9fa5]{2,}/g) || []
+    const stopwords = new Set([
+      '我', '想', '需要', '找', '在', '附近', '以内', '以上', '以下', '左右', '预算', '最好', '可以', '或者', '还是', '帮我', '筛选',
+      '租客', '房客', '申请', '房源', '房子', '租房'
+    ])
+    const cjk = cjkTokens.filter((token) => !stopwords.has(token))
+    return Array.from(new Set([...base, ...cjk]))
+  })()
+  const matchesApplication = (app: any, options: { enforceNumeric: boolean; enforceLocation: boolean; enforceKeyword: boolean }) => {
+    const tenant = app.tenant
+    const property = app.property
+    if (options.enforceNumeric) {
+      if (criteria.minRent || criteria.maxRent) {
+        const price = property?.price
+        if (price === undefined) return false
+        if (criteria.minRent && price < criteria.minRent) return false
+        if (criteria.maxRent && price > criteria.maxRent) return false
+      }
+      if (criteria.minLeaseDuration) {
+        const leaseDuration = property?.leaseDuration
+        if (leaseDuration === undefined || leaseDuration < criteria.minLeaseDuration) return false
+      }
+      const monthlyIncome = app.monthlyIncome || tenant?.tenantProfile?.monthlyIncome
+      const creditScore = app.creditScore || tenant?.tenantProfile?.creditScore
+      if (criteria.requiredIncome && (monthlyIncome === undefined || monthlyIncome < criteria.requiredIncome)) return false
+      if (criteria.minCreditScore && (creditScore === undefined || creditScore < criteria.minCreditScore)) return false
+    }
+    if (options.enforceLocation) {
+      if (criteria.city && (!property?.city || !String(property.city).toLowerCase().includes(String(criteria.city).toLowerCase()))) return false
+      if (criteria.state && (!property?.state || !String(property.state).toLowerCase().includes(String(criteria.state).toLowerCase()))) return false
+    }
+    if (options.enforceKeyword && keywordTokens.length > 0) {
+      const haystack = [
+        tenant?.name,
+        tenant?.email,
+        tenant?.phone,
+        property?.title,
+        property?.address,
+        property?.city,
+        property?.state
+      ]
+        .filter(Boolean)
+        .map((v: any) => String(v).toLowerCase())
+        .join(' ')
+      const hit = keywordTokens.some((token) => haystack.includes(token))
+      if (!hit) return false
+    }
+    return true
+  }
 
   if (isChina) {
     try {
       const db = getDatabaseAdapter()
-      const landlordProperties = await db.query('properties', { landlordId })
-      const landlordPropertyIds = landlordProperties.map((p: any) => p.id).filter(Boolean)
+      const landlordUser = await db.findById('users', landlordId)
+      const normalizedEmail = landlordUser?.email ? String(landlordUser.email).toLowerCase() : ''
+      const allProperties = await db.query('properties', {})
+      const landlordPropertyIds = allProperties
+        .filter((p: any) => {
+          const ownerId = String(
+            p.landlordId ||
+              p.landlord_id ||
+              p.ownerId ||
+              p.owner_id ||
+              p.userId ||
+              p.user_id ||
+              ''
+          )
+          if (ownerId && ownerId === String(landlordId)) return true
+          if (!normalizedEmail) return false
+          const ownerEmail = String(
+            p.landlordEmail ||
+              p.landlord_email ||
+              p.ownerEmail ||
+              p.owner_email ||
+              p.userEmail ||
+              p.user_email ||
+              ''
+          ).toLowerCase()
+          return ownerEmail && ownerEmail === normalizedEmail
+        })
+        .map((p: any) => p.id || p._id)
+        .filter(Boolean)
       if (landlordPropertyIds.length === 0) return []
 
       // CloudBase: 分别获取 PENDING 和 UNDER_REVIEW 的申请，然后合并
@@ -483,7 +640,7 @@ async function searchOwnTenantDatabase(criteria: ParsedLandlordSearchCriteria, l
         if (criteria.minRent || criteria.maxRent) {
            const price = property?.price
            if (price === undefined) {
-               match = false // 无法判断价格，保守起见排除，或者根据业务逻辑处理
+               match = false
            } else {
                if (criteria.minRent && price < criteria.minRent) match = false
                if (criteria.maxRent && price > criteria.maxRent) match = false
@@ -525,13 +682,60 @@ async function searchOwnTenantDatabase(criteria: ParsedLandlordSearchCriteria, l
                 property: property ? {
                     id: property.id || property._id,
                     title: property.title,
-                    address: property.address
+                    address: property.address,
+                    price: property.price,
+                    city: property.city,
+                    state: property.state,
+                    leaseDuration: property.leaseDuration
                 } : undefined
             })
         }
       }
       
-      return filteredApplications.slice(0, 50)
+      const normalized = filteredApplications.map((item: any) => ({
+        ...item,
+        tenant: item,
+        property: item.property
+      }))
+      let filtered = normalized.filter((item: any) => matchesApplication(item, {
+        enforceNumeric: true,
+        enforceLocation: Boolean(criteria.city || criteria.state),
+        enforceKeyword: keywordTokens.length > 0
+      }))
+      if (filtered.length === 0) {
+        filtered = normalized.filter((item: any) => matchesApplication(item, {
+          enforceNumeric: true,
+          enforceLocation: false,
+          enforceKeyword: false
+        }))
+      }
+      if (filtered.length === 0) {
+        filtered = normalized.filter((item: any) => matchesApplication(item, {
+          enforceNumeric: false,
+          enforceLocation: false,
+          enforceKeyword: false
+        }))
+      }
+      const uniqueTenants = (() => {
+        const map = new Map<string, any>()
+        filtered.forEach((item: any, index: number) => {
+          const key = String(item.id || item.tenantId || item.email || item.applicationId || `idx-${index}`)
+          if (!map.has(key)) {
+            map.set(key, item)
+          }
+        })
+        return Array.from(map.values())
+      })()
+      return uniqueTenants.slice(0, 50).map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        email: item.email,
+        phone: item.phone,
+        monthlyIncome: item.monthlyIncome,
+        creditScore: item.creditScore,
+        applicationId: item.applicationId,
+        property: item.property
+      }))
       
     } catch (error) {
       console.error('CloudBase tenant search error:', error)
@@ -568,7 +772,67 @@ async function searchOwnTenantDatabase(criteria: ParsedLandlordSearchCriteria, l
     take: 50
   })
 
-  return applications.map(app => ({
+  const applyFilterPass = (items: typeof applications, options: { enforceNumeric: boolean; enforceLocation: boolean; enforceKeyword: boolean }) => {
+    return items.filter((app) => {
+      if (options.enforceNumeric) {
+        if (criteria.minRent || criteria.maxRent) {
+          const price = app.property?.price
+          if (price === undefined) return false
+          if (criteria.minRent && price < criteria.minRent) return false
+          if (criteria.maxRent && price > criteria.maxRent) return false
+        }
+        if (criteria.minLeaseDuration) {
+          const leaseDuration = app.property?.leaseDuration
+          if (leaseDuration === undefined || leaseDuration < criteria.minLeaseDuration) return false
+        }
+        const monthlyIncome = app.monthlyIncome || app.tenant.tenantProfile?.monthlyIncome
+        const creditScore = app.creditScore || app.tenant.tenantProfile?.creditScore
+        if (criteria.requiredIncome && (monthlyIncome === undefined || monthlyIncome < criteria.requiredIncome)) return false
+        if (criteria.minCreditScore && (creditScore === undefined || creditScore < criteria.minCreditScore)) return false
+      }
+      if (options.enforceLocation) {
+        if (criteria.city && (!app.property?.city || !String(app.property.city).toLowerCase().includes(String(criteria.city).toLowerCase()))) return false
+        if (criteria.state && (!app.property?.state || !String(app.property.state).toLowerCase().includes(String(criteria.state).toLowerCase()))) return false
+      }
+      if (options.enforceKeyword && keywordTokens.length > 0) {
+        const haystack = [
+          app.tenant?.name,
+          app.tenant?.email,
+          app.tenant?.phone,
+          app.property?.title,
+          app.property?.address,
+          app.property?.city,
+          app.property?.state
+        ]
+          .filter(Boolean)
+          .map((v: any) => String(v).toLowerCase())
+          .join(' ')
+        const hit = keywordTokens.some((token) => haystack.includes(token))
+        if (!hit) return false
+      }
+      return true
+    })
+  }
+  let filtered = applyFilterPass(applications, {
+    enforceNumeric: true,
+    enforceLocation: Boolean(criteria.city || criteria.state),
+    enforceKeyword: keywordTokens.length > 0
+  })
+  if (filtered.length === 0) {
+    filtered = applyFilterPass(applications, {
+      enforceNumeric: true,
+      enforceLocation: false,
+      enforceKeyword: false
+    })
+  }
+  if (filtered.length === 0) {
+    filtered = applyFilterPass(applications, {
+      enforceNumeric: false,
+      enforceLocation: false,
+      enforceKeyword: false
+    })
+  }
+  return filtered.map(app => ({
     id: app.tenant.id,
     name: app.tenant.name,
     email: app.tenant.email,

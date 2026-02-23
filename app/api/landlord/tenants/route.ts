@@ -139,6 +139,19 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    if (region === 'global' && user.email) {
+      try {
+        const prismaUser = await runWithRetry(() => prisma.user.findUnique({
+          where: { email: user.email as string },
+          select: { id: true }
+        }))
+        const prismaUserId = prismaUser?.id ? String(prismaUser.id) : ''
+        if (prismaUserId && !landlordIdsForQuery.includes(prismaUserId)) {
+          landlordIdsForQuery.push(prismaUserId)
+        }
+      } catch {}
+    }
+
     let useSupabaseRest = false
     if (region === 'global') {
       try {
@@ -238,20 +251,45 @@ export async function GET(request: NextRequest) {
       }
     } else if (region !== 'global') {
       const allProps = await effectiveDb.query('properties', {})
-      properties = allProps.filter((p: any) => landlordIdsForQuery.includes(String(p.landlordId)))
+      const landlordIdSet = new Set(landlordIdsForQuery.map((id) => String(id)))
+      const normalizedEmail = user?.email ? String(user.email).toLowerCase() : ''
+      properties = allProps.filter((p: any) => {
+        const ownerId = String(
+          p.landlordId ||
+            p.landlord_id ||
+            p.ownerId ||
+            p.owner_id ||
+            p.userId ||
+            p.user_id ||
+            ''
+        )
+        if (ownerId && landlordIdSet.has(ownerId)) return true
+        if (!normalizedEmail) return false
+        const ownerEmail = String(
+          p.landlordEmail ||
+            p.landlord_email ||
+            p.ownerEmail ||
+            p.owner_email ||
+            p.userEmail ||
+            p.user_email ||
+            ''
+        ).toLowerCase()
+        return ownerEmail && ownerEmail === normalizedEmail
+      })
     }
 
-    const propertyIds = properties.map(p => p.id)
-    if (propertyIds.length === 0) {
-      return NextResponse.json({ tenants: [] })
-    }
+    const propertyIds = properties.map(p => p.id || p._id).filter(Boolean).map((id) => String(id))
+    const propertyIdSet = new Set(propertyIds)
+    const landlordIdSet = new Set(landlordIdsForQuery.map((id) => String(id)))
+    const approvedStatuses = ['APPROVED', 'approved', 'Approved']
+    const activeStatuses = ['ACTIVE', 'active', 'Active']
 
     let approvedApplications: any[] = []
     if (region === 'global' && !useSupabaseRest) {
       approvedApplications = await runWithRetry(() => prisma.application.findMany({
         where: {
           propertyId: { in: propertyIds },
-          status: 'APPROVED'
+          status: { in: approvedStatuses as any[] }
         },
         select: {
           id: true,
@@ -276,7 +314,7 @@ export async function GET(request: NextRequest) {
                 .from(tableName)
                 .select('*')
                 .in(propertyField, propertyIds)
-                .eq(statusField, 'APPROVED')
+                .in(statusField, approvedStatuses)
               const { data, error } = await query
               if (!error && data) {
                 approvedApplications = data.map((app: any) => ({
@@ -298,8 +336,19 @@ export async function GET(request: NextRequest) {
         if (approvedApplications.length > 0) break
       }
     } else {
-      const rawApps = await effectiveDb.query('applications', { status: 'APPROVED' })
-      approvedApplications = rawApps.filter((app: any) => propertyIds.includes(app.propertyId))
+      const rawApps = await effectiveDb.query('applications', {})
+      const normalizedEmail = user?.email ? String(user.email).toLowerCase() : ''
+      approvedApplications = rawApps.filter((app: any) => {
+        const status = String(getField(app, ['status']) || '').toUpperCase()
+        if (!approvedStatuses.map((s) => s.toUpperCase()).includes(status)) return false
+        const pid = String(getField(app, ['propertyId', 'property_id']) || '')
+        if (pid && propertyIdSet.has(pid)) return true
+        const landlordId = String(getField(app, ['landlordId', 'landlord_id', 'ownerId', 'owner_id', 'userId', 'user_id']) || '')
+        if (landlordId && landlordIdSet.has(landlordId)) return true
+        if (!normalizedEmail) return false
+        const landlordEmail = String(getField(app, ['landlordEmail', 'landlord_email', 'ownerEmail', 'owner_email', 'userEmail', 'user_email']) || '').toLowerCase()
+        return landlordEmail && landlordEmail === normalizedEmail
+      })
     }
 
     let activeLeases: any[] = []
@@ -307,7 +356,7 @@ export async function GET(request: NextRequest) {
       activeLeases = await runWithRetry(() => prisma.lease.findMany({
         where: {
           landlordId: landlordIdsForQuery.length === 1 ? landlordIdsForQuery[0] : { in: landlordIdsForQuery },
-          status: 'ACTIVE'
+          status: { in: activeStatuses as any[] }
         },
         select: {
           id: true,
@@ -331,7 +380,7 @@ export async function GET(request: NextRequest) {
                 .from(tableName)
                 .select('*')
                 .in(landlordField, landlordIdsForQuery)
-                .eq(statusField, 'ACTIVE')
+                .in(statusField, activeStatuses)
               const { data, error } = await query
               if (!error && data) {
                 activeLeases = data.map((lease: any) => ({
@@ -355,9 +404,22 @@ export async function GET(request: NextRequest) {
       }
     } else {
       const rawLeases = await effectiveDb.query('leases', {})
-      activeLeases = rawLeases.filter((lease: any) =>
-        landlordIdsForQuery.includes(String(lease.landlordId)) && lease.status === 'ACTIVE'
-      )
+      activeLeases = rawLeases.filter((lease: any) => {
+        const leaseStatus = String(lease.status || '').toUpperCase()
+        if (!activeStatuses.map((s) => s.toUpperCase()).includes(leaseStatus)) return false
+        const leaseLandlordId = String(
+          lease.landlordId ||
+            lease.landlord_id ||
+            lease.ownerId ||
+            lease.owner_id ||
+            lease.userId ||
+            lease.user_id ||
+            ''
+        )
+        if (leaseLandlordId && landlordIdSet.has(leaseLandlordId)) return true
+        const pid = String(lease.propertyId || lease.property_id || '')
+        return pid && propertyIdSet.has(pid)
+      })
     }
 
     // Fetch tenant info for leases

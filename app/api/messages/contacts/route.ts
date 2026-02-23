@@ -282,12 +282,28 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const getField = (obj: any, keys: string[]) => {
+      for (const key of keys) {
+        if (obj && obj[key] !== undefined && obj[key] !== null) return obj[key]
+      }
+      return undefined
+    }
+    const userIdSet = new Set<string>([String(user.id), String(currentUser.id)])
+    if (currentUser.email) {
+      try {
+        const byEmail = await db.findUserByEmail(currentUser.email)
+        if (byEmail?.id) userIdSet.add(String(byEmail.id))
+      } catch {}
+    }
+    const normalizedEmail = currentUser.email ? String(currentUser.email).toLowerCase() : ''
+
     const contactsMap = new Map()
 
     // Get all messages involving current user to find last messages
     const allMessages = await db.query('messages', {})
     const allMyMessages = allMessages.filter((m: any) => 
-      m.senderId === user.id || m.receiverId === user.id
+      userIdSet.has(String(getField(m, ['senderId', 'sender_id']) || '')) ||
+      userIdSet.has(String(getField(m, ['receiverId', 'receiver_id']) || ''))
     ).sort((a: any, b: any) => {
       const dateA = new Date(a.createdAt).getTime()
       const dateB = new Date(b.createdAt).getTime()
@@ -297,7 +313,12 @@ export async function GET(request: NextRequest) {
     // Group messages by partner and get the last one
     const lastMessageByPartner = new Map<string, any>()
     allMyMessages.forEach((msg: any) => {
-      const partnerId = msg.senderId === user.id ? msg.receiverId : msg.senderId
+      const senderId = String(getField(msg, ['senderId', 'sender_id']) || '')
+      const receiverId = String(getField(msg, ['receiverId', 'receiver_id']) || '')
+      let partnerId = ''
+      if (userIdSet.has(senderId)) partnerId = receiverId
+      else if (userIdSet.has(receiverId)) partnerId = senderId
+      if (!partnerId) return
       if (!lastMessageByPartner.has(partnerId)) {
         lastMessageByPartner.set(partnerId, msg)
       }
@@ -309,7 +330,9 @@ export async function GET(request: NextRequest) {
       if (partner && partner.id !== user.id && !contactsMap.has(partner.id)) {
         // Count unread messages from this partner
         const unreadMessages = allMyMessages.filter((m: any) => 
-          m.senderId === partnerId && m.receiverId === user.id && !m.isRead
+          String(getField(m, ['senderId', 'sender_id']) || '') === String(partnerId) &&
+          userIdSet.has(String(getField(m, ['receiverId', 'receiver_id']) || '')) &&
+          (m.isRead === false || m.is_read === false)
         )
         
         contactsMap.set(partner.id, {
@@ -329,13 +352,23 @@ export async function GET(request: NextRequest) {
     const normalizedUserType = String(currentUser.userType || '').toUpperCase()
     if (normalizedUserType === 'LANDLORD') {
       const allProperties = await db.query('properties', {})
-      const properties = allProperties.filter((p: any) => p.landlordId === user.id)
-      const propertyIds = properties.map((p: any) => p.id)
+      const properties = allProperties.filter((p: any) => {
+        const ownerId = String(
+          getField(p, ['landlordId', 'landlord_id', 'ownerId', 'owner_id', 'userId', 'user_id']) || ''
+        )
+        if (ownerId && userIdSet.has(ownerId)) return true
+        if (!normalizedEmail) return false
+        const ownerEmail = String(
+          getField(p, ['landlordEmail', 'landlord_email', 'ownerEmail', 'owner_email', 'userEmail', 'user_email']) || ''
+        ).toLowerCase()
+        return ownerEmail && ownerEmail === normalizedEmail
+      })
+      const propertyIds = properties.map((p: any) => p.id || p._id).filter(Boolean)
 
       if (propertyIds.length > 0) {
         const allApplications = await db.query('applications', {})
         const applications = allApplications.filter((app: any) => 
-          propertyIds.includes(app.propertyId)
+          propertyIds.includes(getField(app, ['propertyId', 'property_id']))
         )
 
         for (const app of applications) {
@@ -360,7 +393,10 @@ export async function GET(request: NextRequest) {
     } else if (normalizedUserType === 'TENANT') {
       // Get applications by tenant
       const allApplications = await db.query('applications', {})
-      const applications = allApplications.filter((app: any) => app.tenantId === user.id)
+      const applications = allApplications.filter((app: any) => {
+        const tenantId = String(getField(app, ['tenantId', 'tenant_id']) || '')
+        return tenantId && userIdSet.has(tenantId)
+      })
 
       for (const app of applications) {
         const property = await db.findById('properties', app.propertyId)
@@ -384,7 +420,10 @@ export async function GET(request: NextRequest) {
 
       // Get saved properties
       const allSavedProperties = await db.query('savedProperties', {})
-      const savedProperties = allSavedProperties.filter((saved: any) => saved.userId === user.id)
+      const savedProperties = allSavedProperties.filter((saved: any) => {
+        const sid = String(getField(saved, ['userId', 'user_id']) || '')
+        return sid && userIdSet.has(sid)
+      })
 
       for (const saved of savedProperties) {
         const property = await db.findById('properties', saved.propertyId)

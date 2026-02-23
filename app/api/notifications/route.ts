@@ -74,15 +74,12 @@ export async function GET(request: NextRequest) {
       }
     }
     
-    const query: any = {
-      userId: user.id
-    }
-    
-    if (unreadOnly) {
-      query.isRead = false
-    }
-
     let notifications: any[] = []
+    const buildDbQuery = (userId: string) => {
+      const query: any = { userId }
+      if (unreadOnly) query.isRead = false
+      return query
+    }
     const fetchFromSupabase = async () => {
       if (supabaseReaders.length === 0) {
         return null
@@ -148,7 +145,22 @@ export async function GET(request: NextRequest) {
       return null
     }
     try {
-      notifications = await db.query('notifications', query)
+      if (userIdsForQuery.length === 1) {
+        notifications = await db.query('notifications', buildDbQuery(userIdsForQuery[0]))
+      } else {
+        const all: any[] = []
+        for (const uid of userIdsForQuery) {
+          const items = await db.query('notifications', buildDbQuery(uid))
+          all.push(...(items || []))
+        }
+        const map = new Map<string, any>()
+        all.forEach((n: any) => {
+          const id = String(n.id || n._id || '')
+          if (!id) return
+          if (!map.has(id)) map.set(id, n)
+        })
+        notifications = Array.from(map.values())
+      }
     } catch (error: any) {
       if (isConnectionError(error)) {
         const supabaseNotifications = await fetchFromSupabase()
@@ -199,12 +211,52 @@ export async function PATCH(request: NextRequest) {
     const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined
     const supabaseClient = createSupabaseServerClient(accessToken)
     const supabaseReaders = [supabaseAdmin, supabaseClient].filter(Boolean) as any[]
+    let tokenUserId: string | null = null
+    if (accessToken && supabaseClient) {
+      try {
+        const { data } = await supabaseClient.auth.getUser(accessToken)
+        if (data?.user?.id) {
+          tokenUserId = String(data.user.id)
+        }
+      } catch {}
+    }
+    if (!tokenUserId && accessToken && supabaseAdmin) {
+      try {
+        const { data } = await supabaseAdmin.auth.getUser(accessToken)
+        if (data?.user?.id) {
+          tokenUserId = String(data.user.id)
+        }
+      } catch {}
+    }
+    const userIdsForQuery: string[] = [String(user.id)]
+    if (tokenUserId && !userIdsForQuery.includes(tokenUserId)) {
+      userIdsForQuery.push(tokenUserId)
+    }
+    if (user.email) {
+      try {
+        const dbUser = await db.findUserByEmail(user.email)
+        if (dbUser?.id && !userIdsForQuery.includes(String(dbUser.id))) {
+          userIdsForQuery.push(String(dbUser.id))
+        }
+      } catch {}
+    }
 
     if (markAllAsRead) {
       // Get all unread notifications for user
       let unread: any[] = []
       try {
-        unread = await db.query('notifications', { userId: user.id, isRead: false })
+        const all: any[] = []
+        for (const uid of userIdsForQuery) {
+          const items = await db.query('notifications', { userId: uid, isRead: false })
+          all.push(...(items || []))
+        }
+        const map = new Map<string, any>()
+        all.forEach((n: any) => {
+          const id = String(n.id || n._id || '')
+          if (!id) return
+          if (!map.has(id)) map.set(id, n)
+        })
+        unread = Array.from(map.values())
       } catch (error: any) {
         const msg = String(error?.message || '').toLowerCase()
         if (

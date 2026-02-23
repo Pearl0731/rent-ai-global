@@ -77,6 +77,51 @@ export function PaymentHistory({ userType }: PaymentHistoryProps) {
     fetchPayments()
   }, [])
 
+  const parseMetadata = (payment: any) => {
+    const metadata = payment?.metadata
+    if (!metadata) return undefined
+    if (typeof metadata === 'string') {
+      try {
+        return JSON.parse(metadata)
+      } catch {
+        return undefined
+      }
+    }
+    if (typeof metadata === 'object') {
+      return metadata
+    }
+    return undefined
+  }
+
+  const getPaymentKey = (payment: any) => {
+    const metadata = parseMetadata(payment)
+    const leaseId = metadata?.leaseId || payment?.leaseId
+    if (leaseId) return `lease:${String(leaseId)}`
+    const orderId = metadata?.orderId || metadata?.outTradeNo || metadata?.tradeNo || payment?.transactionId
+    if (orderId) return `order:${String(orderId)}`
+    const propertyId = payment?.propertyId || payment?.property?.id || ''
+    const userId = payment?.userId || payment?.user?.id || ''
+    const type = payment?.type || ''
+    const amount = payment?.amount || ''
+    return `fallback:${String(userId)}|${String(propertyId)}|${String(type)}|${String(amount)}`
+  }
+
+  const dedupePayments = (list: any[]) => {
+    const map = new Map<string, any>()
+    list.forEach((payment) => {
+      const key = getPaymentKey(payment)
+      const existing = map.get(key)
+      const nextTime = new Date(payment.updatedAt || payment.paidAt || payment.createdAt || 0).getTime()
+      const existingTime = existing ? new Date(existing.updatedAt || existing.paidAt || existing.createdAt || 0).getTime() : 0
+      const nextStatus = String(payment.status || '').toUpperCase()
+      const existingStatus = String(existing?.status || '').toUpperCase()
+      if (!existing || nextTime > existingTime || (existingStatus !== 'COMPLETED' && nextStatus === 'COMPLETED')) {
+        map.set(key, payment)
+      }
+    })
+    return Array.from(map.values())
+  }
+
   const fetchPayments = async () => {
     try {
       const token = localStorage.getItem("auth-token")
@@ -91,10 +136,11 @@ export function PaymentHistory({ userType }: PaymentHistoryProps) {
         const data = await response.json()
         console.log('Fetched payments:', data.payments?.length, data.payments)
         const nextPayments = data.payments || []
+        const dedupedPayments = dedupePayments(nextPayments)
         const previousStatuses = previousStatusesRef.current
         const nextStatuses: Record<string, string> = {}
         let hasNewCompletion = false
-        nextPayments.forEach((p: any) => {
+        dedupedPayments.forEach((p: any) => {
           const id = String(p.id ?? p._id ?? '')
           if (!id) return
           const status = String(p.status || '').toUpperCase()
@@ -105,7 +151,7 @@ export function PaymentHistory({ userType }: PaymentHistoryProps) {
           }
         })
         previousStatusesRef.current = nextStatuses
-        setPayments(nextPayments)
+        setPayments(dedupedPayments)
         if (hasNewCompletion) {
           setShowPaymentSuccess(true)
         }

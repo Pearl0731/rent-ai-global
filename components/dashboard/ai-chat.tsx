@@ -119,9 +119,9 @@ export function AIChat({ userType }: AIChatProps) {
         t('exampleQuery3') || "I need a property in Seattle, monthly rent $2000-$3000, lease at least 12 months",
       ])
     : (isChina ? [
-        "帮我筛选信用分大于700且月收入超过5000的潜在租客。",
-        "查找所有申请我的房产且愿意签订1年以上租约的租客。",
-        "显示所有状态为待审核的租房申请，按申请时间排序。",
+        "筛选我名下真实申请记录中信用分大于700且月收入超过5000的租客。",
+        "查找所有已申请我房源且愿意签订1年以上租约的租客。",
+        "显示我房源下真实申请记录中状态为待审核的租客，按申请时间排序。",
       ] : [
         // 国际版房东推荐问题
         t('landlordExampleQuery1') || "I need tenants who can lease for 6+ months with rent up to $3000",
@@ -151,7 +151,7 @@ export function AIChat({ userType }: AIChatProps) {
                   isChina
                     ? (userType === "tenant"
                       ? "我是刚毕业的年轻人，想在大学附近或者热门商圈找个住处。预算1万以内，最好是拎包入住的公寓或者适合合租的联排，交通便利是首选。"
-                      : "帮我筛选信用分大于700且月收入超过5000的潜在租客。")
+                      : "从真实申请记录中筛选信用分大于700且月收入超过5000的租客。")
                     : (userType === "tenant"
                       ? (t('exampleQuery1') || "I need a property within 3km, price $2000-$2500, lease 6 months or longer")
                       : (t('landlordExampleQuery1') || "I need tenants who can lease for 6+ months with rent up to $3000"))

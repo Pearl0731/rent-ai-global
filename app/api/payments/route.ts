@@ -318,9 +318,32 @@ export async function GET(request: NextRequest) {
       const landlordIds = new Set<string>([String(resolvedUserId), String(user.id)])
       if (tokenUserId) landlordIds.add(String(tokenUserId))
       const properties = await effectiveDb.query('properties', {})
+      const normalizedEmail = user?.email ? String(user.email).toLowerCase() : ''
       const propertyIds = new Set(
         properties
-          .filter((p: any) => landlordIds.has(String(p.landlordId || p.landlord_id || '')))
+          .filter((p: any) => {
+            const ownerId = String(
+              p.landlordId ||
+                p.landlord_id ||
+                p.ownerId ||
+                p.owner_id ||
+                p.userId ||
+                p.user_id ||
+                ''
+            )
+            if (ownerId && landlordIds.has(ownerId)) return true
+            if (!normalizedEmail) return false
+            const ownerEmail = String(
+              p.landlordEmail ||
+                p.landlord_email ||
+                p.ownerEmail ||
+                p.owner_email ||
+                p.userEmail ||
+                p.user_email ||
+                ''
+            ).toLowerCase()
+            return ownerEmail && ownerEmail === normalizedEmail
+          })
           .map((p: any) => p.id || p._id)
           .filter(Boolean)
       )
