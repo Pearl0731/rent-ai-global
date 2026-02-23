@@ -64,6 +64,29 @@ export async function POST(
       updatedAt: new Date()
     })
 
+    try {
+      if (lease.propertyId) {
+        await db.update('properties', lease.propertyId, {
+          status: 'OCCUPIED',
+          updatedAt: new Date()
+        })
+      }
+
+      const tenantProfiles = await db.query('tenantProfiles', { userId: user.id })
+      if (tenantProfiles && tenantProfiles.length > 0) {
+        await db.update('tenantProfiles', tenantProfiles[0].id, {
+          status: 'OCCUPIED'
+        })
+      } else {
+        await db.create('tenantProfiles', {
+          userId: user.id,
+          status: 'OCCUPIED'
+        })
+      }
+    } catch (err) {
+      console.error('Failed to update property or tenant status on check-in:', err)
+    }
+
     // 2. Release Escrow Funds (Trigger Split Logic)
     // Find the initial rent payment for this lease
     // Optimize: Query by userId (Tenant) first, then filter by leaseId in metadata

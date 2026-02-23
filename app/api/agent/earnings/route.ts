@@ -34,6 +34,15 @@ export async function GET(request: NextRequest) {
       }
       return undefined
     }
+    const getRepId = (obj: any) => {
+      return (
+        getField(obj, ['representedById', 'represented_by_id', 'tenant_representedById', 'tenant_represented_by_id', 'landlord_representedById', 'landlord_represented_by_id']) ??
+        getField(obj?.tenantProfile, ['representedById', 'represented_by_id']) ??
+        getField(obj?.landlordProfile, ['representedById', 'represented_by_id'])
+      )
+    }
+    const getUserType = (obj: any) =>
+      String(getField(obj, ['userType', 'user_type', 'type', 'role']) || '').toUpperCase()
     const baseUserId = (user as any).id || (user as any).userId
     let agentId = baseUserId
     if (!isChina && (user as any).email) {
@@ -117,6 +126,30 @@ export async function GET(request: NextRequest) {
     }
 
     // 2. Filter for this agent
+    const representedLandlordIds = new Set(
+      users
+        .filter((u: any) => getUserType(u) === 'LANDLORD')
+        .filter((u: any) => agentIdSet.has(String(getRepId(u) || '')))
+        .map((u: any) => String(getField(u, ['id', 'userId', 'user_id']) || ''))
+        .filter(Boolean)
+    )
+    const representedTenantIds = new Set(
+      users
+        .filter((u: any) => getUserType(u) === 'TENANT')
+        .filter((u: any) => agentIdSet.has(String(getRepId(u) || '')))
+        .map((u: any) => String(getField(u, ['id', 'userId', 'user_id']) || ''))
+        .filter(Boolean)
+    )
+    const agentPropertyIds = new Set(
+      properties
+        .filter((p: any) => {
+          const pid = String(getField(p, ['agentId', 'agent_id', 'listingAgentId', 'listing_agent_id', 'brokerId', 'broker_id']) || '')
+          const lid = String(getField(p, ['landlordId', 'landlord_id', 'ownerId', 'owner_id', 'userId', 'user_id']) || '')
+          return agentIdSet.has(pid) || (lid && representedLandlordIds.has(lid))
+        })
+        .map((p: any) => String(getField(p, ['id', 'propertyId', 'property_id', '_id']) || ''))
+        .filter(Boolean)
+    )
     const agentPayments = payments.filter((p: any) => {
       const distributionValue = getField(p, ['distribution', 'distributionDetails', 'distribution_details'])
       const distribution = parseDistribution(distributionValue)
@@ -125,7 +158,12 @@ export async function GET(request: NextRequest) {
       const tenantAgentId = String(getField(details, ['tenantAgentId', 'tenant_agent_id']) || '')
       if (agentIdSet.has(listingAgentId) || agentIdSet.has(tenantAgentId)) return true
       const paymentAgentId = String(getField(p, ['agentId', 'agent_id', 'listingAgentId', 'listing_agent_id', 'tenantAgentId', 'tenant_agent_id']) || '')
-      return paymentAgentId ? agentIdSet.has(paymentAgentId) : false
+      if (paymentAgentId) return agentIdSet.has(paymentAgentId)
+      const paymentPropertyId = String(getField(p, ['propertyId', 'property_id']) || '')
+      if (paymentPropertyId && agentPropertyIds.has(paymentPropertyId)) return true
+      const paymentUserId = String(getField(p, ['userId', 'user_id', 'tenantId', 'tenant_id']) || '')
+      if (paymentUserId && representedTenantIds.has(paymentUserId)) return true
+      return false
     })
     const userMap = new Map(
       users.map((u: any) => {
@@ -141,7 +179,7 @@ export async function GET(request: NextRequest) {
     )
 
     // 3. Enrich with details
-    const earnings = await Promise.all(agentPayments.map(async (p: any) => {
+    const earningsRaw = await Promise.all(agentPayments.map(async (p: any) => {
       let propertyTitle = 'Unknown Property'
       let tenantName = 'Unknown Tenant'
 
@@ -180,11 +218,30 @@ export async function GET(request: NextRequest) {
           ? 'PAID'
           : (getField(p, ['status', 'paymentStatus', 'payment_status']) === 'COMPLETED' ? 'PENDING_RELEASE' : 'PENDING'),
         createdAt: p.createdAt,
+        propertyId,
+        tenantId: userId,
         propertyTitle,
         tenantName,
         currency: getField(distribution, ['currency', 'currencyCode', 'currency_code']) || 'USD'
       }
     }))
+    const earningsMap = new Map<string, any>()
+    earningsRaw.forEach((earning: any) => {
+      const key = earning.propertyId && earning.tenantId
+        ? `property:${earning.propertyId}|tenant:${earning.tenantId}`
+        : `payment:${earning.id}`
+      const existing = earningsMap.get(key)
+      if (!existing) {
+        earningsMap.set(key, earning)
+        return
+      }
+      const existingTime = new Date(existing.createdAt || 0).getTime()
+      const currentTime = new Date(earning.createdAt || 0).getTime()
+      if (currentTime > existingTime) {
+        earningsMap.set(key, earning)
+      }
+    })
+    const earnings = Array.from(earningsMap.values())
 
     // 4. Calculate stats
     const totalEarnings = earnings

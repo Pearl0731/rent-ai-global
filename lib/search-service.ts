@@ -159,6 +159,51 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
     if (rawQuery) return [rawQuery.toLowerCase()]
     return []
   }
+  const locationAliasMap: Record<string, string[]> = {
+    上海: ['shanghai'],
+    北京: ['beijing'],
+    广州: ['guangzhou'],
+    深圳: ['shenzhen'],
+    杭州: ['hangzhou'],
+    南京: ['nanjing'],
+    苏州: ['suzhou'],
+    成都: ['chengdu'],
+    重庆: ['chongqing'],
+    天津: ['tianjin'],
+    武汉: ['wuhan'],
+    西安: ['xian', "xi'an"],
+    郑州: ['zhengzhou'],
+    长沙: ['changsha'],
+    厦门: ['xiamen'],
+    青岛: ['qingdao'],
+    宁波: ['ningbo'],
+    福州: ['fuzhou'],
+    合肥: ['hefei'],
+    昆明: ['kunming'],
+    沈阳: ['shenyang'],
+    大连: ['dalian'],
+    哈尔滨: ['harbin']
+  }
+  const getLocationTokens = (value?: string) => {
+    if (!value) return []
+    const raw = value.trim()
+    if (!raw) return []
+    const lower = raw.toLowerCase()
+    const tokens = new Set<string>([lower])
+    const trimmed = raw.replace(/(市|省|区|县|自治区|特别行政区)$/g, '')
+    if (trimmed && trimmed !== raw) tokens.add(trimmed.toLowerCase())
+    Object.entries(locationAliasMap).forEach(([cn, aliases]) => {
+      if (lower === cn.toLowerCase() || aliases.map((a) => a.toLowerCase()).includes(lower)) {
+        tokens.add(cn.toLowerCase())
+        aliases.forEach((a) => tokens.add(a.toLowerCase()))
+      }
+      if (trimmed && (trimmed === cn || aliases.map((a) => a.toLowerCase()).includes(trimmed.toLowerCase()))) {
+        tokens.add(cn.toLowerCase())
+        aliases.forEach((a) => tokens.add(a.toLowerCase()))
+      }
+    })
+    return Array.from(tokens)
+  }
   const applyFilters = (
     items: any[],
     options: {
@@ -170,6 +215,8 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
     }
   ) => {
     const tokens = options.useKeyword ? getTokens() : []
+    const cityTokens = options.useLocation ? getLocationTokens(criteria.city) : []
+    const stateTokens = options.useLocation ? getLocationTokens(criteria.state) : []
     return items.filter((p: any) => {
       if (options.enforceStatus && p.status) {
         const normalizedStatus = String(p.status).toUpperCase()
@@ -178,12 +225,60 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
       if (options.enforceNumeric) {
         if (criteria.minPrice && (p.price === undefined || p.price < criteria.minPrice)) return false
         if (criteria.maxPrice && (p.price === undefined || p.price > criteria.maxPrice)) return false
-        if (criteria.minBedrooms && (p.bedrooms === undefined || p.bedrooms < criteria.minBedrooms)) return false
+        const bedroomsValue = p.bedrooms ?? p.bedroom ?? p.bedroomsCount
+        if (criteria.exactBedrooms !== undefined) {
+          if (bedroomsValue === undefined || bedroomsValue !== criteria.exactBedrooms) return false
+        } else if (criteria.minBedrooms && (bedroomsValue === undefined || bedroomsValue < criteria.minBedrooms)) {
+          return false
+        }
         if (criteria.minBathrooms && (p.bathrooms === undefined || p.bathrooms < criteria.minBathrooms)) return false
       }
+      if (criteria.propertyType) {
+        const rawType = p.propertyType ?? p.type ?? p.listingType ?? p.category
+        if (!rawType) return false
+        const normalized = String(rawType).toLowerCase()
+        const target = String(criteria.propertyType).toLowerCase()
+        const aliasMap: Record<string, string[]> = {
+          studio: ['studio', 'studio apartment', 'efficiency', '单间', '工作室'],
+          apartment: ['apartment', '公寓', 'flat'],
+          condo: ['condo', '复式'],
+          house: ['house', '独栋', '别墅', 'villa'],
+          villa: ['villa', '别墅'],
+          townhouse: ['townhouse', '联排']
+        }
+        const aliases = aliasMap[target] || [target]
+        if (!aliases.some((alias) => normalized.includes(alias.toLowerCase()))) return false
+      }
       if (options.useLocation) {
-        if (criteria.city && (!p.city || !String(p.city).toLowerCase().includes(criteria.city.toLowerCase()))) return false
-        if (criteria.state && (!p.state || !String(p.state).toLowerCase().includes(criteria.state.toLowerCase()))) return false
+        const cityValue = [
+          p.city,
+          p.cityName,
+          p.city_cn,
+          p.address?.city,
+          p.addressInfo?.city,
+          p.location?.city,
+          p.region,
+          p.district
+        ]
+          .filter(Boolean)
+          .map((v: any) => String(v).toLowerCase())
+          .join(' ')
+        const stateValue = [
+          p.state,
+          p.stateName,
+          p.province,
+          p.provinceName,
+          p.address?.state,
+          p.addressInfo?.state,
+          p.location?.state,
+          p.region,
+          p.district
+        ]
+          .filter(Boolean)
+          .map((v: any) => String(v).toLowerCase())
+          .join(' ')
+        if (criteria.city && cityTokens.length > 0 && !cityTokens.some((token) => cityValue.includes(token))) return false
+        if (criteria.state && stateTokens.length > 0 && !stateTokens.some((token) => stateValue.includes(token))) return false
       }
       if (tokens.length > 0) {
         const haystack = [
@@ -261,7 +356,7 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
       if (filteredProperties.length === 0 && rawQuery) {
         filteredProperties = applyFilters(rawProperties, {
           useKeyword: false,
-          useLocation: false,
+          useLocation: hasLocationFilter,
           enforceStatus: true,
           enforceNumeric: false,
           enforcePet: false
@@ -279,7 +374,7 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
       if (filteredProperties.length === 0) {
         filteredProperties = applyFilters(rawProperties, {
           useKeyword: false,
-          useLocation: false,
+          useLocation: hasLocationFilter,
           enforceStatus: false,
           enforceNumeric: false,
           enforcePet: false
@@ -318,13 +413,18 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
             if (criteria.minPrice) where.price.gte = criteria.minPrice
             if (criteria.maxPrice) where.price.lte = criteria.maxPrice
           }
-          if (criteria.minBedrooms) {
+          if (criteria.exactBedrooms !== undefined) {
+            where.bedrooms = criteria.exactBedrooms
+          } else if (criteria.minBedrooms) {
             where.bedrooms = { gte: criteria.minBedrooms }
           }
           if (criteria.minBathrooms) {
             where.bathrooms = { gte: criteria.minBathrooms }
           }
         }
+      if (criteria.propertyType) {
+        where.propertyType = { contains: criteria.propertyType, mode: 'insensitive' }
+      }
 
         if (options.includeLocation) {
           if (criteria.city) {
@@ -364,7 +464,7 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
       })
       properties = applyFilters(properties, {
         useKeyword: false,
-        useLocation: false,
+        useLocation: hasLocationFilter,
         enforceStatus: true,
         enforceNumeric: false,
         enforcePet: false
@@ -400,7 +500,7 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
         if (filtered.length === 0) {
           filtered = applyFilters(relaxedProperties, {
             useKeyword: false,
-            useLocation: false,
+            useLocation: hasLocationFilter,
             enforceStatus: true,
             enforceNumeric: true,
             enforcePet: true
@@ -422,7 +522,7 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
           })
           filtered = applyFilters(allProperties, {
             useKeyword: false,
-            useLocation: false,
+            useLocation: hasLocationFilter,
             enforceStatus: true,
             enforceNumeric: false,
             enforcePet: false
@@ -442,7 +542,13 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
             },
             take: 50
           })
-          filtered = allProperties
+          filtered = applyFilters(allProperties, {
+            useKeyword: false,
+            useLocation: hasLocationFilter,
+            enforceStatus: false,
+            enforceNumeric: false,
+            enforcePet: false
+          })
         }
         properties = filtered
       }
@@ -470,7 +576,7 @@ async function searchOwnDatabase(criteria: ParsedTenantSearchCriteria): Promise<
         if (relaxed.length === 0) {
           relaxed = applyFilters(allProperties, {
             useKeyword: false,
-            useLocation: false,
+            useLocation: hasLocationFilter,
             enforceStatus: false,
             enforceNumeric: false,
             enforcePet: false

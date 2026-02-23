@@ -2,7 +2,7 @@
 
 import { Suspense } from "react"
 import { useState, useEffect } from "react"
-import { useSearchParams } from "next/navigation"
+import { useSearchParams, useRouter } from "next/navigation"
 import { useTranslations } from 'next-intl'
 import { Header } from "@/components/layout/header"
 import { Footer } from "@/components/layout/footer"
@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast"
 
 function SearchContent() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const { toast } = useToast()
   const t = useTranslations('search')
   const tCommon = useTranslations('common')
@@ -22,6 +23,14 @@ function SearchContent() {
   const [searchQuery, setSearchQuery] = useState("")
   const [properties, setProperties] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    const token = localStorage.getItem("auth-token")
+    const user = localStorage.getItem("user")
+    if (!token || !user) {
+      router.replace("/auth/login")
+    }
+  }, [router])
 
   useEffect(() => {
     const q = searchParams.get("q")

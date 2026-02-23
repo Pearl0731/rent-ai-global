@@ -97,8 +97,24 @@ export async function GET(request: NextRequest) {
         }
       } catch {}
     }
+    const getField = (obj: any, keys: string[]) => {
+      for (const key of keys) {
+        const value = obj?.[key]
+        if (value !== undefined && value !== null && value !== '') return value
+      }
+      return undefined
+    }
+    const getRepId = (obj: any) => {
+      return (
+        getField(obj, ['representedById', 'represented_by_id', 'tenant_representedById', 'tenant_represented_by_id', 'landlord_representedById', 'landlord_represented_by_id']) ??
+        getField(obj?.tenantProfile, ['representedById', 'represented_by_id']) ??
+        getField(obj?.landlordProfile, ['representedById', 'represented_by_id'])
+      )
+    }
 
     const where: any = {}
+    const agentIds = new Set<string>([String(resolvedUserId), String(user.id)])
+    if (tokenUserId) agentIds.add(String(tokenUserId))
     
     if (resolvedUserType === 'TENANT') {
       // Tenants see their own payments
@@ -109,6 +125,25 @@ export async function GET(request: NextRequest) {
       where.property = {
         landlordId: landlordIds.size === 1 ? Array.from(landlordIds)[0] : { in: Array.from(landlordIds) }
       }
+    } else if (resolvedUserType === 'AGENT') {
+      const representedProfiles = await prisma.landlordProfile.findMany({
+        where: { representedById: { in: Array.from(agentIds) } },
+        select: { userId: true }
+      })
+      const representedLandlordIds = representedProfiles.map((p) => p.userId).filter(Boolean)
+      const orConditions: any[] = [{ agentId: { in: Array.from(agentIds) } }]
+      if (representedLandlordIds.length > 0) {
+        orConditions.push({ landlordId: { in: representedLandlordIds } })
+      }
+      const relatedProperties = await prisma.property.findMany({
+        where: { OR: orConditions },
+        select: { id: true }
+      })
+      const propertyIds = relatedProperties.map((p) => p.id)
+      if (propertyIds.length === 0) {
+        return NextResponse.json({ payments: [] })
+      }
+      where.property = { id: { in: propertyIds } }
     }
     let useSupabaseRest = false
     if (region === 'global') {
@@ -155,9 +190,11 @@ export async function GET(request: NextRequest) {
       const paymentTables = ['Payment', 'payment', 'payments']
       const propertyTables = ['Property', 'property', 'properties', 'Listing', 'listing', 'listings']
       const userTables = ['User', 'user', 'users', 'Profile', 'profile', 'profiles']
+      const landlordProfileTables = ['LandlordProfile', 'landlordProfile', 'landlord_profiles', 'landlordprofiles']
       const paymentUserFields = ['userId', 'user_id']
       const paymentPropertyFields = ['propertyId', 'property_id']
       const landlordFields = ['landlordId', 'landlord_id', 'ownerId', 'owner_id', 'userId', 'user_id']
+      const agentFields = ['agentId', 'agent_id', 'brokerId', 'broker_id', 'listingAgentId', 'listing_agent_id']
       const emailFields = ['landlordEmail', 'landlord_email', 'ownerEmail', 'owner_email', 'userEmail', 'user_email']
 
       let propertyIds: string[] = []
@@ -216,6 +253,61 @@ export async function GET(request: NextRequest) {
             if (propertyIds.length > 0) break
           }
         }
+      } else if (resolvedUserType === 'AGENT') {
+        const agentIdList = Array.from(agentIds)
+        let representedLandlordIds: string[] = []
+        for (const client of supabaseReaders) {
+          for (const tableName of landlordProfileTables) {
+            for (const repField of ['representedById', 'represented_by_id']) {
+              const { data, error } = await client
+                .from(tableName)
+                .select('userId,user_id')
+                .in(repField, agentIdList)
+              if (!error && data) {
+                representedLandlordIds = data
+                  .map((row: any) => row.userId ?? row.user_id)
+                  .filter(Boolean)
+                break
+              }
+            }
+            if (representedLandlordIds.length > 0) break
+          }
+          if (representedLandlordIds.length > 0) break
+        }
+        for (const client of supabaseReaders) {
+          for (const tableName of propertyTables) {
+            for (const agentField of agentFields) {
+              const { data, error } = await client
+                .from(tableName)
+                .select('id')
+                .in(agentField, agentIdList)
+              if (!error && data) {
+                propertyIds = data.map((row: any) => row.id).filter(Boolean)
+                break
+              }
+            }
+            if (propertyIds.length > 0) break
+          }
+          if (propertyIds.length > 0) break
+        }
+        if (propertyIds.length === 0 && representedLandlordIds.length > 0) {
+          for (const client of supabaseReaders) {
+            for (const tableName of propertyTables) {
+              for (const landlordField of landlordFields) {
+                const { data, error } = await client
+                  .from(tableName)
+                  .select('id')
+                  .in(landlordField, representedLandlordIds)
+                if (!error && data) {
+                  propertyIds = data.map((row: any) => row.id).filter(Boolean)
+                  break
+                }
+              }
+              if (propertyIds.length > 0) break
+            }
+            if (propertyIds.length > 0) break
+          }
+        }
       }
 
       let payments: any[] = []
@@ -227,6 +319,11 @@ export async function GET(request: NextRequest) {
               if (resolvedUserType === 'TENANT') {
                 query = query.eq(userField, resolvedUserId)
               } else if (resolvedUserType === 'LANDLORD') {
+                if (propertyIds.length === 0) {
+                  return NextResponse.json({ payments: [] })
+                }
+                query = query.in(propertyField, propertyIds)
+              } else if (resolvedUserType === 'AGENT') {
                 if (propertyIds.length === 0) {
                   return NextResponse.json({ payments: [] })
                 }
@@ -345,6 +442,30 @@ export async function GET(request: NextRequest) {
             return ownerEmail && ownerEmail === normalizedEmail
           })
           .map((p: any) => p.id || p._id)
+          .filter(Boolean)
+      )
+      payments = payments.filter((p: any) => {
+        const pid = String(p.propertyId || p.property_id || '')
+        return pid && propertyIds.has(pid)
+      })
+    } else if (resolvedUserType === 'AGENT') {
+      const properties = await effectiveDb.query('properties', {})
+      const users = await effectiveDb.query('users', {}, { orderBy: { createdAt: 'desc' } })
+      const representedLandlordIds = new Set(
+        users
+          .filter((u: any) => String(u.userType || '').toUpperCase() === 'LANDLORD')
+          .filter((u: any) => agentIds.has(String(getRepId(u) || '')))
+          .map((u: any) => String(getField(u, ['id', 'userId', 'user_id']) || ''))
+          .filter(Boolean)
+      )
+      const propertyIds = new Set(
+        properties
+          .filter((p: any) => {
+            const pid = String(getField(p, ['agentId', 'agent_id', 'brokerId', 'broker_id']) || '')
+            const lid = String(getField(p, ['landlordId', 'landlord_id', 'ownerId', 'owner_id', 'userId', 'user_id']) || '')
+            return agentIds.has(pid) || (lid && representedLandlordIds.has(lid))
+          })
+          .map((p: any) => String(getField(p, ['id', '_id']) || ''))
           .filter(Boolean)
       )
       payments = payments.filter((p: any) => {

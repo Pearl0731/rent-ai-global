@@ -6,32 +6,14 @@ import { useTranslations } from 'next-intl'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Search, MapPin, Home, Shield } from "lucide-react"
-import Link from "next/link"
-import { useToast } from "@/hooks/use-toast"
 
 function SearchBar() {
   const router = useRouter()
-  const { toast } = useToast()
   const t = useTranslations('hero')
   const [searchQuery, setSearchQuery] = useState("")
 
   const handleSearch = () => {
-    const token = localStorage.getItem("auth-token")
-    if (!token) {
-      toast({
-        title: "Login Required",
-        description: "Please login to continue.",
-        variant: "destructive",
-      })
-      router.push("/auth/login")
-      return
-    }
-
-    if (searchQuery.trim()) {
-      router.push(`/search?q=${encodeURIComponent(searchQuery)}`)
-    } else {
-      router.push("/search")
-    }
+    router.replace("/auth/login")
   }
 
   return (
@@ -57,20 +39,9 @@ function SearchBar() {
 export function HeroSection() {
   const t = useTranslations('hero')
   const router = useRouter()
-  const { toast } = useToast()
 
   const handleNavigation = (path: string) => {
-    const token = localStorage.getItem("auth-token")
-    if (!token) {
-      toast({
-        title: "Login Required",
-        description: "Please login to continue.",
-        variant: "destructive",
-      })
-      router.push("/auth/login")
-    } else {
-      router.push(path)
-    }
+    router.replace("/auth/login")
   }
 
   return (

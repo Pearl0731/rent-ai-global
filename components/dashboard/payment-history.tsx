@@ -95,13 +95,14 @@ export function PaymentHistory({ userType }: PaymentHistoryProps) {
 
   const getPaymentKey = (payment: any) => {
     const metadata = parseMetadata(payment)
+    const propertyId = payment?.propertyId || payment?.property?.id || ''
+    const userId = payment?.userId || payment?.user?.id || ''
+    const type = payment?.type || ''
+    if (type === 'RENT' && propertyId && userId) return `rent:${String(userId)}|${String(propertyId)}`
     const leaseId = metadata?.leaseId || payment?.leaseId
     if (leaseId) return `lease:${String(leaseId)}`
     const orderId = metadata?.orderId || metadata?.outTradeNo || metadata?.tradeNo || payment?.transactionId
     if (orderId) return `order:${String(orderId)}`
-    const propertyId = payment?.propertyId || payment?.property?.id || ''
-    const userId = payment?.userId || payment?.user?.id || ''
-    const type = payment?.type || ''
     const amount = payment?.amount || ''
     return `fallback:${String(userId)}|${String(propertyId)}|${String(type)}|${String(amount)}`
   }
@@ -184,11 +185,11 @@ export function PaymentHistory({ userType }: PaymentHistoryProps) {
         console.log("Funds released")
       } else {
         const data = await response.json()
-        alert(data.error || "Failed to confirm check-in")
+        alert(data.error || t('failedToConfirmCheckIn') || (isChina ? '确认入住失败' : 'Failed to confirm check-in'))
       }
     } catch (error) {
       console.error("Release error:", error)
-      alert("An error occurred")
+      alert(t('errorConfirmingCheckIn') || (isChina ? '确认入住时发生错误' : 'An error occurred'))
     }
   }
 

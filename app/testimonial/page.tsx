@@ -15,6 +15,52 @@ import { useToast } from "@/hooks/use-toast"
 export default function TestimonialPage() {
   const router = useRouter()
   const { toast } = useToast()
+  const isChina = process.env.NEXT_PUBLIC_APP_REGION === 'china'
+  const copy = isChina
+    ? {
+        title: "写评价",
+        subtitle: "分享你的 RentGuard 体验，帮助更多用户做出选择",
+        name: "姓名",
+        namePlaceholder: "请输入你的姓名",
+        role: "身份",
+        rolePlaceholder: "例如：租客、房东、中介",
+        rating: "评分",
+        content: "评价内容",
+        contentPlaceholder: "分享你对 RentGuard 的体验与建议...",
+        submit: "提交评价",
+        submitting: "提交中...",
+        emptyContentTitle: "请填写评价",
+        emptyContentDesc: "评价内容不能为空",
+        successTitle: "感谢你的评价",
+        successDesc: "我们已收到你的反馈",
+        errorTitle: "提交失败",
+        errorDesc: "提交评价失败",
+        tenant: "租客",
+        landlord: "房东",
+        agent: "中介",
+      }
+    : {
+        title: "Share Your Experience",
+        subtitle: "Help others by sharing your experience with RentGuard",
+        name: "Your Name",
+        namePlaceholder: "Enter your name",
+        role: "Your Role",
+        rolePlaceholder: "e.g., Tenant, Landlord, Agent",
+        rating: "Rating",
+        content: "Your Review",
+        contentPlaceholder: "Share your experience with RentGuard...",
+        submit: "Submit Review",
+        submitting: "Submitting...",
+        emptyContentTitle: "Error",
+        emptyContentDesc: "Please write your review",
+        successTitle: "Thank you!",
+        successDesc: "Your review has been submitted successfully.",
+        errorTitle: "Error",
+        errorDesc: "Failed to submit review",
+        tenant: "Tenant",
+        landlord: "Landlord",
+        agent: "Agent",
+      }
   const [loading, setLoading] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [formData, setFormData] = useState({
@@ -28,22 +74,27 @@ export default function TestimonialPage() {
     const userStr = localStorage.getItem("user")
     if (userStr) {
       const userData = JSON.parse(userStr)
+      const roleLabel = userData.userType === "TENANT"
+        ? (isChina ? "租客" : "Tenant")
+        : userData.userType === "LANDLORD"
+          ? (isChina ? "房东" : "Landlord")
+          : (isChina ? "中介" : "Agent")
       setUser(userData)
       setFormData(prev => ({
         ...prev,
         name: userData.name || "",
-        role: userData.userType === "TENANT" ? "Tenant" : userData.userType === "LANDLORD" ? "Landlord" : "Agent",
+        role: roleLabel,
       }))
     }
-  }, [])
+  }, [isChina])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
     if (!formData.content.trim()) {
       toast({
-        title: "Error",
-        description: "Please write your review",
+        title: copy.emptyContentTitle,
+        description: copy.emptyContentDesc,
         variant: "destructive",
       })
       return
@@ -61,18 +112,18 @@ export default function TestimonialPage() {
 
       if (response.ok) {
         toast({
-          title: "Thank you!",
-          description: "Your review has been submitted successfully.",
+          title: copy.successTitle,
+          description: copy.successDesc,
         })
         router.push("/")
       } else {
         const data = await response.json()
-        throw new Error(data.error || "Failed to submit review")
+        throw new Error(data.error || copy.errorDesc)
       }
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to submit review",
+        title: copy.errorTitle,
+        description: error.message || copy.errorDesc,
         variant: "destructive",
       })
     } finally {
@@ -87,37 +138,35 @@ export default function TestimonialPage() {
         <div className="max-w-2xl mx-auto">
           <Card>
             <CardHeader className="text-center">
-              <CardTitle className="text-3xl">Share Your Experience</CardTitle>
-              <CardDescription>
-                Help others by sharing your experience with RentGuard
-              </CardDescription>
+              <CardTitle className="text-3xl">{copy.title}</CardTitle>
+              <CardDescription>{copy.subtitle}</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="space-y-2">
-                  <Label htmlFor="name">Your Name</Label>
+                  <Label htmlFor="name">{copy.name}</Label>
                   <Input
                     id="name"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="Enter your name"
+                    placeholder={copy.namePlaceholder}
                     required
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="role">Your Role</Label>
+                  <Label htmlFor="role">{copy.role}</Label>
                   <Input
                     id="role"
                     value={formData.role}
                     onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                    placeholder="e.g., Tenant, Landlord, Agent"
+                    placeholder={copy.rolePlaceholder}
                     required
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Rating</Label>
+                  <Label>{copy.rating}</Label>
                   <div className="flex space-x-2">
                     {[1, 2, 3, 4, 5].map((star) => (
                       <button
@@ -139,19 +188,19 @@ export default function TestimonialPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="content">Your Review</Label>
+                  <Label htmlFor="content">{copy.content}</Label>
                   <Textarea
                     id="content"
                     value={formData.content}
                     onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                    placeholder="Share your experience with RentGuard..."
+                    placeholder={copy.contentPlaceholder}
                     rows={5}
                     required
                   />
                 </div>
 
                 <Button type="submit" className="w-full" size="lg" disabled={loading}>
-                  {loading ? "Submitting..." : "Submit Review"}
+                  {loading ? copy.submitting : copy.submit}
                 </Button>
               </form>
             </CardContent>

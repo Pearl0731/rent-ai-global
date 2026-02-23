@@ -95,16 +95,7 @@ export function AIChat({ userType }: AIChatProps) {
     }
   }
 
-  // 根据环境变量决定显示国内版还是国际版的推荐问题
-  // 在客户端组件中，通过检查当前语言环境来判断
-  const currentLocale = typeof window !== 'undefined' 
-    ? (document.documentElement.lang || 'en')
-    : 'en'
-  // 检查环境变量（在客户端，NEXT_PUBLIC_ 前缀的变量会被注入到客户端）
-  const appRegion = typeof window !== 'undefined' 
-    ? ((window as any).__NEXT_DATA__?.env?.NEXT_PUBLIC_APP_REGION || (process.env as any).NEXT_PUBLIC_APP_REGION || 'global')
-    : 'global'
-  const isChina = appRegion === 'china' || currentLocale === 'zh' || currentLocale === 'zh-CN'
+  const isChina = (process.env.NEXT_PUBLIC_APP_REGION || 'global') === 'china'
   
   const exampleQueries = userType === "tenant" 
     ? (isChina ? [

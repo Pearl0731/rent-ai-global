@@ -24,6 +24,7 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
   const tPayment = useTranslations('payment')
   const currencySymbol = getCurrencySymbol()
   const [applications, setApplications] = useState<any[]>([])
+  const [payments, setPayments] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   const renderStatus = (status?: string) => {
@@ -40,7 +41,7 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
       case 'UNDER_REVIEW':
         return tApplication('underReview')
       case 'AGENT_APPROVED':
-        return tApplication('agentApproved') || "Agent Approved"
+        return tApplication('approved') || "Approved"
       default:
         return tApplication('status')
     }
@@ -48,6 +49,7 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
 
   useEffect(() => {
     fetchApplications()
+    fetchPayments()
   }, [userType])
 
   const uniqueApplications = useMemo(() => {
@@ -88,12 +90,45 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
     }
   }
 
-  const handleApprove = async (applicationId: string) => {
+  const parseMetadata = (payment: any) => {
+    const metadata = payment?.metadata
+    if (!metadata) return undefined
+    if (typeof metadata === 'string') {
+      try {
+        return JSON.parse(metadata)
+      } catch {
+        return undefined
+      }
+    }
+    if (typeof metadata === 'object') {
+      return metadata
+    }
+    return undefined
+  }
+
+  const fetchPayments = async () => {
     try {
       const token = localStorage.getItem("auth-token")
       if (!token) return
 
-      const newStatus = userType === 'agent' ? 'AGENT_APPROVED' : 'APPROVED'
+      const response = await fetch("/api/payments", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setPayments(data.payments || [])
+      }
+    } catch (error) {
+      console.error("Failed to fetch payments:", error)
+    }
+  }
+
+  const handleApprove = async (applicationId: string) => {
+    try {
+      const token = localStorage.getItem("auth-token")
+      if (!token) return
 
       const response = await fetch(`/api/applications/${applicationId}`, {
         method: "PATCH",
@@ -101,7 +136,7 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: 'APPROVED' }),
       })
 
       if (response.ok) {
@@ -159,22 +194,31 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
   }
 
   const canReview = (application: any) => {
+    const status = String(application.status || '').toUpperCase()
     if (userType === 'agent') {
-      // Agent can review PENDING applications
-      return application.status === 'PENDING'
+      return status === 'PENDING'
     }
     if (userType === 'landlord') {
-      // Landlord can review AGENT_APPROVED applications?
-      // User requirement: "If agent has processed it, landlord should NOT be able to process it"
-      // So if status is AGENT_APPROVED, Landlord CANNOT review.
-      if (application.status === 'AGENT_APPROVED') return false
-      
-      // Landlord can review PENDING applications ONLY IF there is no agent
-      if (application.status === 'PENDING' && !application.property?.agentId) return true
-      
-      return false
+      return status === 'PENDING'
     }
     return false
+  }
+
+  const getPaymentStatus = (application: any) => {
+    const tenantId = application.tenantId || application.tenant?.id
+    const propertyId = application.propertyId || application.property?.id
+    const match = payments.find((p) => {
+      const metadata = parseMetadata(p)
+      const paymentTenantId = p.userId || p.user?.id || metadata?.tenantId
+      const paymentPropertyId = p.propertyId || p.property?.id || metadata?.propertyId
+      const type = String(p.type || '').toUpperCase()
+      if (type !== 'RENT') return false
+      if (tenantId && paymentTenantId && String(paymentTenantId) !== String(tenantId)) return false
+      if (propertyId && paymentPropertyId && String(paymentPropertyId) !== String(propertyId)) return false
+      return true
+    })
+    if (!match) return null
+    return String(match.status || '').toUpperCase()
   }
 
   if (loading) {
@@ -235,7 +279,11 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
                     </Badge>
                     {((application.status || '').toUpperCase() === 'APPROVED' || (application.status || '').toUpperCase() === 'AGENT_APPROVED') ? (
                       <div className="mt-2 text-xs text-muted-foreground">
-                        {tPayment('status') || "Status"}: {tPayment('pending') || "Pending Payment"}
+                        {tPayment('status') || "Status"}: {(() => {
+                          const status = getPaymentStatus(application)
+                          if (status === 'COMPLETED' || status === 'PAID') return tPayment('completed') || "Paid"
+                          return tPayment('pending') || "Pending Payment"
+                        })()}
                       </div>
                     ) : null}
                   </div>
@@ -308,7 +356,11 @@ export function TenantApplications({ userType = 'landlord' }: TenantApplications
                   )}
                   {userType === 'landlord' && application.status === 'AGENT_APPROVED' && (
                     <span className="text-sm text-muted-foreground self-center">
-                      {tApplication('agentApproved') || "Agent Approved"} · {tPayment('pending') || "Pending Payment"}
+                      {tApplication('agentApproved') || "Agent Approved"} · {(() => {
+                        const status = getPaymentStatus(application)
+                        if (status === 'COMPLETED' || status === 'PAID') return tPayment('completed') || "Paid"
+                        return tPayment('pending') || "Pending Payment"
+                      })()}
                     </span>
                   )}
                 </div>

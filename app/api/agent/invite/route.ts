@@ -134,6 +134,25 @@ export async function POST(request: NextRequest) {
       })
       console.log(`[Invite] Notification created for user ${existingUser.id}`)
 
+      const agentNotificationTitle = targetType === 'LANDLORD'
+        ? (region === 'china' ? '新的房东合作' : 'New Landlord Partnership')
+        : (region === 'china' ? '新的租客代理' : 'New Tenant Representation')
+      const targetName = existingUser.name || existingUser.email || (targetType === 'LANDLORD' ? (region === 'china' ? '房东' : 'landlord') : (region === 'china' ? '租客' : 'tenant'))
+      const agentNotificationMessage = targetType === 'LANDLORD'
+        ? (region === 'china'
+          ? `您已与房东 ${targetName} 建立合作关系。`
+          : `You are now partnered with landlord ${targetName}.`)
+        : (region === 'china'
+          ? `您已成为租客 ${targetName} 的代理。`
+          : `You are now representing tenant ${targetName}.`)
+      await db.create('notifications', {
+        userId: agentId,
+        type: 'SYSTEM',
+        title: agentNotificationTitle,
+        message: agentNotificationMessage,
+        isRead: false
+      })
+
       // 2. Create Message (More visible in Message Center)
       await db.create('messages', {
           senderId: agentId,

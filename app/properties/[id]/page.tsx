@@ -23,6 +23,7 @@ export default function PropertyDetailPage() {
   const [userType, setUserType] = useState<string | null>(null)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const currencySymbol = getCurrencySymbol()
+  const isChina = process.env.NEXT_PUBLIC_APP_REGION === 'china'
 
   useEffect(() => {
     const userStr = localStorage.getItem("user")
@@ -90,8 +91,8 @@ export default function PropertyDetailPage() {
     const token = localStorage.getItem("auth-token")
     if (!token) {
       toast({
-        title: "Please login",
-        description: "You need to login to save properties",
+        title: isChina ? "请先登录" : "Please login",
+        description: isChina ? "登录后才能收藏房源" : "You need to login to save properties",
         variant: "destructive",
       })
       return
@@ -107,8 +108,8 @@ export default function PropertyDetailPage() {
         if (response.ok) {
           setIsSaved(false)
           toast({
-            title: "Removed",
-            description: "Property removed from saved list",
+            title: isChina ? "已取消收藏" : "Removed",
+            description: isChina ? "已从收藏列表移除" : "Property removed from saved list",
           })
         }
       } else {
@@ -123,18 +124,18 @@ export default function PropertyDetailPage() {
         if (response.ok) {
           setIsSaved(true)
           toast({
-            title: "Saved",
-            description: "Property added to saved list",
+            title: isChina ? "已收藏" : "Saved",
+            description: isChina ? "已加入收藏列表" : "Property added to saved list",
           })
         } else {
           const data = await response.json()
-          throw new Error(data.error || "Failed to save property")
+          throw new Error(data.error || (isChina ? "收藏失败" : "Failed to save property"))
         }
       }
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to save property",
+        title: isChina ? "错误" : "Error",
+        description: error.message || (isChina ? "收藏失败" : "Failed to save property"),
         variant: "destructive",
       })
     } finally {
@@ -175,9 +176,27 @@ export default function PropertyDetailPage() {
     )
   }
 
-  const images = typeof property.images === 'string' 
-    ? JSON.parse(property.images || '[]')
-    : (property.images || [])
+  const normalizeImages = (raw: any) => {
+    if (!raw) return []
+    if (Array.isArray(raw)) return raw.filter(Boolean)
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) return parsed.filter(Boolean)
+        if (parsed && Array.isArray(parsed.images)) return parsed.images.filter(Boolean)
+      } catch {}
+      const parts = raw.split(',').map((item) => item.trim()).filter(Boolean)
+      if (parts.length > 1) return parts
+      return raw.startsWith('http') || raw.startsWith('data:') ? [raw] : []
+    }
+    if (typeof raw === 'object' && raw) {
+      const images = (raw as any).images
+      if (Array.isArray(images)) return images.filter(Boolean)
+    }
+    return []
+  }
+
+  const images = normalizeImages(property.images)
   const amenities = typeof property.amenities === 'string'
     ? JSON.parse(property.amenities || '[]')
     : (property.amenities || [])
@@ -392,7 +411,9 @@ export default function PropertyDetailPage() {
               <CardHeader>
                 <CardTitle className="text-2xl">
                   {currencySymbol}{property.price.toLocaleString()}
-                  <span className="text-lg font-normal text-muted-foreground">/month</span>
+                  <span className="text-lg font-normal text-muted-foreground">
+                    {isChina ? "/月" : "/month"}
+                  </span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">

@@ -30,6 +30,15 @@ export async function GET(request: NextRequest) {
       }
       return undefined
     }
+    const getRepId = (obj: any) => {
+      return (
+        getField(obj, ['representedById', 'represented_by_id', 'tenant_representedById', 'tenant_represented_by_id', 'landlord_representedById', 'landlord_represented_by_id']) ??
+        getField(obj?.tenantProfile, ['representedById', 'represented_by_id']) ??
+        getField(obj?.landlordProfile, ['representedById', 'represented_by_id'])
+      )
+    }
+    const getUserType = (obj: any) =>
+      String(getField(obj, ['userType', 'user_type', 'type', 'role']) || '').toUpperCase()
     const baseUserId = (user as any).id || (user as any).userId
     let agentId = baseUserId
     if ((user as any).email) {
@@ -109,6 +118,20 @@ export async function GET(request: NextRequest) {
       tenantAgentId: lease.tenantAgentId ?? lease.tenant_agent_id,
       createdAt: lease.createdAt ?? lease.created_at
     })
+    const representedLandlordIds = new Set(
+      users
+        .filter((u: any) => getUserType(u) === 'LANDLORD')
+        .filter((u: any) => agentIdSet.has(String(getRepId(u) || '')))
+        .map((u: any) => String(getField(u, ['id', 'userId', 'user_id']) || ''))
+        .filter(Boolean)
+    )
+    const representedTenantIds = new Set(
+      users
+        .filter((u: any) => getUserType(u) === 'TENANT')
+        .filter((u: any) => agentIdSet.has(String(getRepId(u) || '')))
+        .map((u: any) => String(getField(u, ['id', 'userId', 'user_id']) || ''))
+        .filter(Boolean)
+    )
     const filteredLeases = leases.map(normalizeLease).filter((lease: any) => {
       const listingAgentId = String(getField(lease, ['listingAgentId', 'listing_agent_id']) || '')
       const tenantAgentId = String(getField(lease, ['tenantAgentId', 'tenant_agent_id']) || '')
@@ -117,9 +140,30 @@ export async function GET(request: NextRequest) {
       const propertyId = String(getField(lease, ['propertyId', 'property_id']) || '')
       const property = propertyMap.get(propertyId)
       const propertyAgentId = String(getField(property, propertyAgentFields) || '')
-      return propertyAgentId ? agentIdSet.has(propertyAgentId) : true
+      if (propertyAgentId && agentIdSet.has(propertyAgentId)) return true
+      const landlordId = String(getField(lease, ['landlordId', 'landlord_id']) || '')
+      if (landlordId && representedLandlordIds.has(landlordId)) return true
+      const tenantId = String(getField(lease, ['tenantId', 'tenant_id']) || '')
+      if (tenantId && representedTenantIds.has(tenantId)) return true
+      return false
     })
-    const transactions = filteredLeases.map((lease: any) => {
+    const leaseMap = new Map<string, any>()
+    filteredLeases.forEach((lease: any) => {
+      const propertyId = String(getField(lease, ['propertyId', 'property_id']) || '')
+      const tenantId = String(getField(lease, ['tenantId', 'tenant_id']) || '')
+      const key = propertyId ? `property:${propertyId}|tenant:${tenantId}` : `lease:${lease.id}`
+      const existing = leaseMap.get(key)
+      if (!existing) {
+        leaseMap.set(key, lease)
+        return
+      }
+      const existingTime = new Date(existing.createdAt || 0).getTime()
+      const currentTime = new Date(lease.createdAt || 0).getTime()
+      if (currentTime > existingTime) {
+        leaseMap.set(key, lease)
+      }
+    })
+    const transactions = Array.from(leaseMap.values()).map((lease: any) => {
       const propertyId = String(getField(lease, ['propertyId', 'property_id']) || '')
       const tenantId = String(getField(lease, ['tenantId', 'tenant_id']) || '')
       const landlordId = String(getField(lease, ['landlordId', 'landlord_id']) || '')

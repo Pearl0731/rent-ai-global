@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Search, MapPin, Filter, Heart, Calendar, MessageSquare, UserCheck, CheckCircle } from "lucide-react"
+import { Search, MapPin, Heart, Calendar, MessageSquare, UserCheck, CheckCircle } from "lucide-react"
 import { PropertyCard } from "@/components/dashboard/property-card"
 import { PaymentHistory } from "@/components/dashboard/payment-history"
 import { MessageCenter } from "@/components/dashboard/message-center"
@@ -277,7 +277,7 @@ export default function TenantDashboard() {
 
   // Handle Confirm Check-in
   const handleCheckIn = async (leaseId: string) => {
-    if (!confirm(t('confirmCheckIn') + "?")) return
+    if (!confirm(t('confirmCheckInPrompt') || (t('confirmCheckIn') + "?"))) return
     
     // Find payment for this lease - using robust matching logic similar to render
     const lease = leases.find(l => l.id === leaseId)
@@ -316,11 +316,11 @@ export default function TenantDashboard() {
             return
           }
         }
-        alert(err.error || err.message || "Failed to confirm check-in")
+        alert(err.error || err.message || t('failedToConfirmCheckIn') || (isChina ? '确认入住失败' : 'Failed to confirm check-in'))
       }
     } catch (e) {
       console.error(e)
-      alert("Error confirming check-in")
+      alert(t('errorConfirmingCheckIn') || (isChina ? '确认入住时发生错误' : 'Error confirming check-in'))
     }
   }
 
@@ -643,7 +643,7 @@ export default function TenantDashboard() {
                                 )}
                               </div>
                             )}
-                            <Button variant="outline" size="sm" onClick={() => router.push(`/dashboard/tenant/property/${lease.propertyId}`)}>
+                            <Button variant="outline" size="sm" onClick={() => router.push(`/properties/${lease.propertyId}`)}>
                               {isChina ? "查看详情" : tCommon('viewDetails')}
                             </Button>
                           </div>
@@ -673,10 +673,6 @@ export default function TenantDashboard() {
                       onChange={(e) => setSearchQuery(e.target.value)}
                     />
                   </div>
-                  <Button variant="outline">
-                    <Filter className="mr-2 h-4 w-4" />
-                    {tCommon('filter') || "Filters"}
-                  </Button>
                   <Button
                     onClick={async () => {
                     if (!searchQuery.trim()) {

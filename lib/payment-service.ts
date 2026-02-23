@@ -169,19 +169,30 @@ export async function createAlipayOrder(
     
     // 读取环境变量，支持多种格式
     const appId = process.env.ALIPAY_APP_ID || process.env.NEXT_PUBLIC_ALIPAY_APP_ID || '9021000161601994'
-    const privateKey = process.env.ALIPAY_PRIVATE_KEY || process.env.NEXT_PUBLIC_ALIPAY_PRIVATE_KEY || ''
+    const rawPrivateKey = process.env.ALIPAY_PRIVATE_KEY 
+      || process.env.NEXT_PUBLIC_ALIPAY_PRIVATE_KEY 
+      || process.env['ALIPAY-PRIVATE-KEY'] 
+      || process.env['NEXT_PUBLIC_ALIPAY-PRIVATE-KEY'] 
+      || ''
+    const trimmedPrivateKey = rawPrivateKey.trim()
+    const privateKey = ((trimmedPrivateKey.startsWith('"') && trimmedPrivateKey.endsWith('"')) ||
+      (trimmedPrivateKey.startsWith("'") && trimmedPrivateKey.endsWith("'")) ||
+      (trimmedPrivateKey.startsWith('`') && trimmedPrivateKey.endsWith('`')))
+      ? trimmedPrivateKey.slice(1, -1)
+      : trimmedPrivateKey
+    const normalizedPrivateKey = privateKey.replace(/\\n/g, '\n')
     const alipayPublicKey = process.env.ALIPAY_PUBLIC_KEY || process.env.NEXT_PUBLIC_ALIPAY_PUBLIC_KEY || 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwKo0Yi8ZRb7Hgxo9Xb6A7GnfzjOt4XhBdXhqaLskRa/la1OQVd0m7aF8J2wrIximkxYglg5LTWC0quI2wr8wCUm8f/qCjRIn0NJFxBsY+ZiREQWQyILwiUiV8tYt+J114RYm2y0CiR+3BNUZcppoqj0u7Fru0XY+Wedn+krvmyqFZw7JKqXWeLZL1B11A8i/4XzcBDIFxm67Kwvr1Qr5UF6VEQSkIKRjF57PKWqGfZe+DmhD7PmBVsUo3mbueEJLs7qABkVLi0y3ebkRNVcBv0LW7jFaWmrR8dUSppc/HvDMLaNj6Cnt6T38cRZxQ5YZzYHE05EfYIEdbusto0cDmwIDAQAB'
     const gateway = normalizeAlipayGateway(process.env.ALIPAY_GATEWAY || process.env.NEXT_PUBLIC_ALIPAY_GATEWAY)
     
     // 检查私钥是否配置
-    if (!privateKey || privateKey.trim() === '') {
+    if (!normalizedPrivateKey || normalizedPrivateKey.trim() === '') {
       console.error('Alipay private key is not configured. Please set ALIPAY_PRIVATE_KEY in .env.local')
       throw new Error('支付宝私钥未配置，请在 .env.local 文件中设置 ALIPAY_PRIVATE_KEY')
     }
     
     const alipayConfig = {
       appId: appId,
-      privateKey: privateKey,
+      privateKey: normalizedPrivateKey,
       alipayPublicKey: alipayPublicKey,
       gateway: gateway,
       notifyUrl: `${baseUrl}/api/payments/alipay/notify`,

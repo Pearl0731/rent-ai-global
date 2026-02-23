@@ -139,22 +139,14 @@ export async function PATCH(
       )
     }
 
-    // Agent Intervention Logic - 中介审批流介入
-    let originalStatus = application.status // Save original status for rollback
-    if (status === 'APPROVED' && property.agentId) {
-      if (isAgent) {
-        // 中介批准 -> 实际上等同于最终批准 (根据用户需求，中介批准后房东不能再操作，且需生成支付)
-        // 所以这里我们依然使用 AGENT_APPROVED 作为状态名，但赋予它与 APPROVED 相同的支付生成逻辑
-        status = 'AGENT_APPROVED'
-      } else if (isLandlord) {
-        // 房东批准 -> 必须先经过中介批准
-        if (application.status !== 'AGENT_APPROVED') {
-          return NextResponse.json(
-            { error: 'Application must be reviewed by agent first - 申请必须先经过中介审核' },
-            { status: 403 }
-          )
-        }
-      }
+    const originalStatus = application.status
+    const currentStatus = String(application.status || '').toUpperCase()
+    const finalizedStatuses = new Set(['APPROVED', 'REJECTED', 'WITHDRAWN', 'AGENT_APPROVED'])
+    if (finalizedStatuses.has(currentStatus)) {
+      return NextResponse.json(
+        { error: 'Application already finalized - 申请已处理，无法再次操作' },
+        { status: 409 }
+      )
     }
 
     // 更新申请状态，使用重试机制
@@ -224,38 +216,9 @@ export async function PATCH(
       },
     })
 
-    // 中介批准后通知房东
-    if (status === 'AGENT_APPROVED') {
-      const isChina = region === 'china'
-      
-      const notificationTitle = isChina 
-        ? '申请待复审' 
-        : 'Application Pending Review'
-      
-      const notificationMessage = isChina
-        ? `中介已通过租客 ${tenant ? tenant.name : 'Unknown'} 的申请，请您最终审核。` 
-        : `Agent has approved application from ${tenant ? tenant.name : 'Unknown'}. Please provide final approval.`
 
-      try {
-        await db.create('notifications', {
-          userId: property.landlordId,
-          type: 'APPLICATION_UPDATE',
-          title: notificationTitle,
-          message: notificationMessage,
-          isRead: false,
-          link: `/dashboard/landlord/applications/${application.id}`,
-          metadata: JSON.stringify({
-             applicationId: application.id,
-             propertyId: property.id
-          })
-        })
-      } catch (notifErr) {
-        console.error('Failed to create notification for landlord:', notifErr)
-      }
-    }
-
-    // 如果申请被批准 (APPROVED/AGENT_APPROVED)，创建租赁合同并提示支付
-    if (status === 'APPROVED' || status === 'AGENT_APPROVED') {
+    // 如果申请被批准 (APPROVED)，创建租赁合同并提示支付
+    if (status === 'APPROVED') {
       // 获取租客的tenantAgentId（如果有中介代理）
       let tenantAgentId = null
       try {
@@ -275,23 +238,23 @@ export async function PATCH(
         )
       }
 
-      // 1. 更新房源状态为OCCUPIED（出租中）
+      // 1. 更新房源状态为PENDING（待支付）
       await db.update('properties', property.id, {
-        status: 'OCCUPIED',
+        status: 'PENDING',
       })
 
-      // 2. 更新租客状态为OCCUPIED（入住中）
+      // 2. 更新租客状态为PENDING（待支付）
       try {
         const tenantProfiles = await db.query('tenantProfiles', { userId: tenant.id })
         if (tenantProfiles && tenantProfiles.length > 0) {
           await db.update('tenantProfiles', tenantProfiles[0].id, {
-            status: 'OCCUPIED'
+            status: 'PENDING'
           })
         } else {
           // 如果租客资料不存在，创建一个
           await db.create('tenantProfiles', {
             userId: tenant.id,
-            status: 'OCCUPIED',
+            status: 'PENDING',
             monthlyIncome: application.monthlyIncome || null,
             creditScore: application.creditScore || null,
             employmentStatus: null,

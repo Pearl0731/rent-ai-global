@@ -18,6 +18,7 @@ export default function ApplicationsPage() {
   const currencySymbol = getCurrencySymbol()
   const isChina = process.env.NEXT_PUBLIC_APP_REGION === 'china'
   const [applications, setApplications] = useState<any[]>([])
+  const [payments, setPayments] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   const renderStatus = (status?: string) => {
@@ -61,6 +62,7 @@ export default function ApplicationsPage() {
 
   useEffect(() => {
     fetchApplications()
+    fetchPayments()
   }, [])
 
   const uniqueApplications = useMemo(() => {
@@ -101,6 +103,58 @@ export default function ApplicationsPage() {
     }
   }
 
+  const parseMetadata = (payment: any) => {
+    const metadata = payment?.metadata
+    if (!metadata) return undefined
+    if (typeof metadata === 'string') {
+      try {
+        return JSON.parse(metadata)
+      } catch {
+        return undefined
+      }
+    }
+    if (typeof metadata === 'object') {
+      return metadata
+    }
+    return undefined
+  }
+
+  const fetchPayments = async () => {
+    try {
+      const token = localStorage.getItem("auth-token")
+      if (!token) return
+
+      const response = await fetch("/api/payments", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setPayments(data.payments || [])
+      }
+    } catch (error) {
+      console.error("Failed to fetch payments:", error)
+    }
+  }
+
+  const getPaymentStatus = (application: any) => {
+    const tenantId = application.tenantId || application.tenant?.id
+    const propertyId = application.propertyId || application.property?.id
+    const match = payments.find((p) => {
+      const metadata = parseMetadata(p)
+      const paymentTenantId = p.userId || p.user?.id || metadata?.tenantId
+      const paymentPropertyId = p.propertyId || p.property?.id || metadata?.propertyId
+      const type = String(p.type || '').toUpperCase()
+      if (type !== 'RENT') return false
+      if (tenantId && paymentTenantId && String(paymentTenantId) !== String(tenantId)) return false
+      if (propertyId && paymentPropertyId && String(paymentPropertyId) !== String(propertyId)) return false
+      return true
+    })
+    if (!match) return null
+    return String(match.status || '').toUpperCase()
+  }
+
   return (
     <DashboardLayout userType="tenant">
       <div className="space-y-6">
@@ -136,7 +190,11 @@ export default function ApplicationsPage() {
                       </Badge>
                       {(application.status || '').toUpperCase() === 'APPROVED' || (application.status || '').toUpperCase() === 'AGENT_APPROVED' ? (
                         <div className="mt-2 text-xs text-muted-foreground">
-                          {tPayment('status') || "Status"}: {tPayment('pending') || "Pending Payment"}
+                          {tPayment('status') || "Status"}: {(() => {
+                            const status = getPaymentStatus(application)
+                            if (status === 'COMPLETED' || status === 'PAID') return tPayment('completed') || "Paid"
+                            return tPayment('pending') || "Pending Payment"
+                          })()}
                         </div>
                       ) : null}
                       <div className="mt-2">

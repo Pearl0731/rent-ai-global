@@ -9,13 +9,13 @@ export function Footer() {
 
   const footerLinks = {
     [t('forRenters')]: [
-      { name: t('findHomes'), href: "/search" },
+      { name: t('findHomes'), href: "/auth/login" },
       { name: t('howItWorks'), href: "/how-it-works" },
       { name: t('depositProtection'), href: "/deposit-protection" },
       { name: t('renterResources'), href: "/resources/renters" },
     ],
     [t('forLandlords')]: [
-      { name: t('listProperty'), href: "/list-property" },
+      { name: t('listProperty'), href: "/auth/login" },
       { name: t('landlordTools'), href: "/tools" },
       { name: t('pricing'), href: "/pricing" },
       { name: t('successStories'), href: "/success-stories" },
@@ -68,7 +68,10 @@ export function Footer() {
               <ul className="space-y-2">
                 {links.map((link) => (
                   <li key={link.name}>
-                    <Link href={link.href} className="text-muted-foreground hover:text-primary transition-colors">
+                    <Link
+                      href={link.href}
+                      className="text-muted-foreground hover:text-primary transition-colors"
+                    >
                       {link.name}
                     </Link>
                   </li>

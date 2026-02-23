@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Header } from "@/components/layout/header"
 import { Footer } from "@/components/layout/footer"
@@ -15,6 +15,66 @@ import { useToast } from "@/hooks/use-toast"
 export default function ListPropertyPage() {
   const router = useRouter()
   const { toast } = useToast()
+  const isChina = process.env.NEXT_PUBLIC_APP_REGION === 'china'
+  const copy = isChina
+    ? {
+        title: "发布房源",
+        subtitle: "创建一套可出租的新房源",
+        propertyTitle: "房源标题",
+        propertyType: "房源类型",
+        description: "房源描述",
+        address: "详细地址",
+        city: "城市",
+        state: "省份/州",
+        zipCode: "邮编",
+        monthlyRent: "月租金（¥）",
+        deposit: "押金（¥）",
+        bedrooms: "卧室数",
+        bathrooms: "卫生间数",
+        squareFeet: "面积（㎡）",
+        buttonIdle: "发布房源",
+        buttonLoading: "创建中...",
+        typeApartment: "公寓",
+        typeHouse: "住宅",
+        typeCondo: "公寓楼",
+        typeStudio: "开间",
+        typeTownhouse: "联排",
+        loginRequiredTitle: "请先登录",
+        loginRequiredDesc: "只有登录的房东可以发布房源",
+        createSuccessTitle: "房源创建成功",
+        createSuccessDesc: "您的房源已成功发布",
+        createFailedTitle: "创建失败",
+        createFailedDefault: "创建失败",
+      }
+    : {
+        title: "List Your Property",
+        subtitle: "Add a new property to rent",
+        propertyTitle: "Property Title",
+        propertyType: "Property Type",
+        description: "Description",
+        address: "Address",
+        city: "City",
+        state: "State",
+        zipCode: "Zip Code",
+        monthlyRent: "Monthly Rent ($)",
+        deposit: "Deposit ($)",
+        bedrooms: "Bedrooms",
+        bathrooms: "Bathrooms",
+        squareFeet: "Square Feet",
+        buttonIdle: "List Property",
+        buttonLoading: "Creating...",
+        typeApartment: "Apartment",
+        typeHouse: "House",
+        typeCondo: "Condo",
+        typeStudio: "Studio",
+        typeTownhouse: "Townhouse",
+        loginRequiredTitle: "Login Required",
+        loginRequiredDesc: "Only logged-in landlords can list a property",
+        createSuccessTitle: "Property Created",
+        createSuccessDesc: "Your property has been listed successfully",
+        createFailedTitle: "Creation Failed",
+        createFailedDefault: "Failed to create property",
+      }
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState({
     title: "",
@@ -32,14 +92,22 @@ export default function ListPropertyPage() {
     petFriendly: false,
   })
 
+  useEffect(() => {
+    const token = localStorage.getItem("auth-token")
+    const user = localStorage.getItem("user")
+    if (!token || !user) {
+      router.replace("/auth/login")
+    }
+  }, [router])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
     const token = localStorage.getItem("auth-token")
     if (!token) {
       toast({
-        title: "请先登录",
-        description: "只有登录的房东可以发布房源",
+        title: copy.loginRequiredTitle,
+        description: copy.loginRequiredDesc,
         variant: "destructive",
       })
       router.push("/auth/login")
@@ -69,16 +137,16 @@ export default function ListPropertyPage() {
       const data = await response.json()
       if (response.ok) {
         toast({
-          title: "房源创建成功",
-          description: "您的房源已成功发布",
+          title: copy.createSuccessTitle,
+          description: copy.createSuccessDesc,
         })
         router.push("/dashboard/landlord")
       } else {
-        throw new Error(data.error || "创建失败")
+        throw new Error(data.error || copy.createFailedDefault)
       }
     } catch (error: any) {
       toast({
-        title: "创建失败",
+        title: copy.createFailedTitle,
         description: error.message,
         variant: "destructive",
       })
@@ -93,14 +161,14 @@ export default function ListPropertyPage() {
       <main className="container py-12">
         <Card className="max-w-3xl mx-auto">
           <CardHeader>
-            <CardTitle>List Your Property</CardTitle>
-            <CardDescription>Add a new property to rent</CardDescription>
+            <CardTitle>{copy.title}</CardTitle>
+            <CardDescription>{copy.subtitle}</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="title">Property Title *</Label>
+                  <Label htmlFor="title">{copy.propertyTitle} *</Label>
                   <Input
                     id="title"
                     value={formData.title}
@@ -109,7 +177,7 @@ export default function ListPropertyPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="propertyType">Property Type *</Label>
+                  <Label htmlFor="propertyType">{copy.propertyType} *</Label>
                   <Select
                     value={formData.propertyType}
                     onValueChange={(value) => setFormData({ ...formData, propertyType: value })}
@@ -118,18 +186,18 @@ export default function ListPropertyPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="APARTMENT">Apartment</SelectItem>
-                      <SelectItem value="HOUSE">House</SelectItem>
-                      <SelectItem value="CONDO">Condo</SelectItem>
-                      <SelectItem value="STUDIO">Studio</SelectItem>
-                      <SelectItem value="TOWNHOUSE">Townhouse</SelectItem>
+                      <SelectItem value="APARTMENT">{copy.typeApartment}</SelectItem>
+                      <SelectItem value="HOUSE">{copy.typeHouse}</SelectItem>
+                      <SelectItem value="CONDO">{copy.typeCondo}</SelectItem>
+                      <SelectItem value="STUDIO">{copy.typeStudio}</SelectItem>
+                      <SelectItem value="TOWNHOUSE">{copy.typeTownhouse}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="description">Description *</Label>
+                <Label htmlFor="description">{copy.description} *</Label>
                 <Textarea
                   id="description"
                   value={formData.description}
@@ -140,7 +208,7 @@ export default function ListPropertyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="address">Address *</Label>
+                <Label htmlFor="address">{copy.address} *</Label>
                 <Input
                   id="address"
                   value={formData.address}
@@ -151,7 +219,7 @@ export default function ListPropertyPage() {
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="city">City *</Label>
+                  <Label htmlFor="city">{copy.city} *</Label>
                   <Input
                     id="city"
                     value={formData.city}
@@ -160,7 +228,7 @@ export default function ListPropertyPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="state">State *</Label>
+                  <Label htmlFor="state">{copy.state} *</Label>
                   <Input
                     id="state"
                     value={formData.state}
@@ -169,7 +237,7 @@ export default function ListPropertyPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="zipCode">Zip Code</Label>
+                  <Label htmlFor="zipCode">{copy.zipCode}</Label>
                   <Input
                     id="zipCode"
                     value={formData.zipCode}
@@ -180,7 +248,7 @@ export default function ListPropertyPage() {
 
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="price">Monthly Rent ($) *</Label>
+                  <Label htmlFor="price">{copy.monthlyRent} *</Label>
                   <Input
                     id="price"
                     type="number"
@@ -190,7 +258,7 @@ export default function ListPropertyPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="deposit">Deposit ($) *</Label>
+                  <Label htmlFor="deposit">{copy.deposit} *</Label>
                   <Input
                     id="deposit"
                     type="number"
@@ -200,7 +268,7 @@ export default function ListPropertyPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="bedrooms">Bedrooms *</Label>
+                  <Label htmlFor="bedrooms">{copy.bedrooms} *</Label>
                   <Input
                     id="bedrooms"
                     type="number"
@@ -210,7 +278,7 @@ export default function ListPropertyPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="bathrooms">Bathrooms *</Label>
+                  <Label htmlFor="bathrooms">{copy.bathrooms} *</Label>
                   <Input
                     id="bathrooms"
                     type="number"
@@ -223,7 +291,7 @@ export default function ListPropertyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="sqft">Square Feet</Label>
+                <Label htmlFor="sqft">{copy.squareFeet}</Label>
                 <Input
                   id="sqft"
                   type="number"
@@ -233,7 +301,7 @@ export default function ListPropertyPage() {
               </div>
 
               <Button type="submit" className="w-full" size="lg" disabled={loading}>
-                {loading ? "创建中..." : "List Property"}
+                {loading ? copy.buttonLoading : copy.buttonIdle}
               </Button>
             </form>
           </CardContent>
